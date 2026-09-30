@@ -1,0 +1,28 @@
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# local env files
+.env*
+!.env.example
+
+# tooling
+/coverage
+/tsconfig.tsbuildinfo
+next-env.d.ts.tmp
+
+# OS/editor
+.DS_Store
+Thumbs.db
+*.swp
+
+# Supabase local runtime metadata and generated signing keys
+/supabase/.temp/

@@ -1,0 +1,2 @@
+-- Intentionally no fixture accounts or privileged role assignments.
+-- Add only synthetic, non-auth application fixtures here when their workflows are ready.
