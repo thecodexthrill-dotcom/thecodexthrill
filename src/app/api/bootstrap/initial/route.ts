@@ -1,4 +1,4 @@
-﻿import { NextResponse, type NextRequest } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { verifyOwnerBootstrapToken } from "@/lib/supabase/bootstrap-token";
@@ -36,10 +36,28 @@ export async function POST(request: NextRequest) {
   }
   const parsed = z.object({ email: z.string().trim().email().max(320) }).safeParse(body);
   if (!parsed.success) return NextResponse.json({ error: "A valid owner-approved email is required." }, { status: 400 });
+  const configuredOwnerEmail = process.env.OWNER_SUPER_ADMIN_EMAIL?.trim().toLowerCase();
+  if (!configuredOwnerEmail || parsed.data.email.toLowerCase() !== configuredOwnerEmail) {
+    return NextResponse.json({ error: "The requested account does not match the configured Owner identity." }, { status: 403 });
+  }
 
   let admin;
   try { admin = createAdminClient(); } catch {
     return NextResponse.json({ error: "Server-only Supabase credentials are unavailable." }, { status: 503 });
+  }
+
+  let existingOwner = null;
+  for (let page = 1; page <= 100; page += 1) {
+    const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 1000 });
+    if (error) return NextResponse.json({ error: "The existing Owner identity could not be verified." }, { status: 503 });
+    existingOwner = data.users.find((user) => user.email?.toLowerCase() === configuredOwnerEmail) ?? existingOwner;
+    if (existingOwner || data.users.length < 1000) break;
+  }
+
+  if (existingOwner && (!existingOwner.email_confirmed_at || !existingOwner.invited_at
+    || existingOwner.is_anonymous
+    || (existingOwner.banned_until && new Date(existingOwner.banned_until).getTime() > Date.now()))) {
+    return NextResponse.json({ error: "The existing Owner account is not an eligible verified invitation; no authorization was recorded." }, { status: 409 });
   }
 
   const authorizationExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
@@ -50,6 +68,10 @@ export async function POST(request: NextRequest) {
   });
   if (authorizationError || authorized !== true) {
     return NextResponse.json({ error: "Initial bootstrap authorization is expired, already used, or could not be recorded." }, { status: 409 });
+  }
+
+  if (existingOwner) {
+    return NextResponse.json({ ok: true, message: "The existing Owner account is already confirmed from an invitation. No duplicate invitation was sent; sign in or request password recovery, then enroll and verify TOTP MFA before explicitly confirming the one-time designation." });
   }
 
   const { error: inviteError } = await admin.auth.admin.inviteUserByEmail(parsed.data.email, { redirectTo });
