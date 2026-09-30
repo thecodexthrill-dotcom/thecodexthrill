@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { verifyOwnerBootstrapToken } from "@/lib/supabase/bootstrap-token";
+import { resolveAppOrigin } from "@/lib/app-origin";
 
 export const runtime = "nodejs";
 
@@ -17,18 +18,9 @@ export async function POST(request: NextRequest) {
   const ownerToken = getOwnerToken(request);
   if (!ownerToken) return NextResponse.json({ error: "Unauthorized or expired bootstrap token." }, { status: 401 });
 
-  const baseUrl = process.env.APP_BASE_URL;
-  if (!baseUrl) return NextResponse.json({ error: "APP_BASE_URL is not configured." }, { status: 503 });
-  let redirectTo: string;
-  try {
-    const base = new URL(baseUrl);
-    if (base.protocol !== "https:" && base.hostname !== "127.0.0.1" && base.hostname !== "localhost") {
-      return NextResponse.json({ error: "APP_BASE_URL must use HTTPS outside local development." }, { status: 503 });
-    }
-    redirectTo = new URL("/auth/callback?next=%2Finvite%2Faccept", base).toString();
-  } catch {
-    return NextResponse.json({ error: "APP_BASE_URL is invalid." }, { status: 503 });
-  }
+  const appBase = resolveAppOrigin();
+  if (!appBase) return NextResponse.json({ error: "The secure application origin is not configured." }, { status: 503 });
+  const redirectTo = new URL("/auth/callback?next=%2Finvite%2Faccept", appBase).toString();
 
   let body: unknown;
   try { body = await request.json(); } catch {

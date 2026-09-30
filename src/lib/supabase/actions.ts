@@ -6,6 +6,7 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireWorkspace } from "@/lib/supabase/access";
+import { resolveAppOrigin } from "@/lib/app-origin";
 
 export type AuthActionState = { error?: string; message?: string; passwordUpdated?: boolean };
 
@@ -37,20 +38,8 @@ export async function requestPasswordResetAction(
   const email = z.string().trim().email().max(320).safeParse(formData.get("email"));
   if (!email.success) return { error: "Enter a valid email address." };
 
-  const configuredAppBase = process.env.APP_BASE_URL;
-  if (!configuredAppBase && process.env.NODE_ENV === "production") {
-    return { error: "Password recovery is unavailable because the app URL is not configured." };
-  }
-  let appBase: URL;
-  try {
-    appBase = new URL(configuredAppBase || "http://127.0.0.1:3000");
-  } catch {
-    return { error: "Password recovery is unavailable because the app URL is invalid." };
-  }
-  const isLocalApp = ["localhost", "127.0.0.1", "[::1]"].includes(appBase.hostname);
-  if ((appBase.protocol !== "https:" && !isLocalApp) || appBase.username || appBase.password || appBase.pathname !== "/" || appBase.search || appBase.hash) {
-    return { error: "Password recovery requires a valid HTTPS app URL." };
-  }
+  const appBase = resolveAppOrigin("http://127.0.0.1:3000");
+  if (!appBase) return { error: "Password recovery is unavailable because the HTTPS app origin is not configured." };
 
   const supabase = await createClient();
   const { error } = await supabase.auth.resetPasswordForEmail(email.data, {
@@ -142,21 +131,9 @@ export async function inviteUserAction(
   });
   if (auditError) return { error: "The invitation attempt could not be audited; no invitation was sent." };
 
-  const configuredBaseUrl = process.env.APP_BASE_URL;
-  if (!configuredBaseUrl && process.env.NODE_ENV === "production") {
-    return { error: "Invitations are unavailable because the app URL is not configured." };
-  }
-  const baseUrl = configuredBaseUrl || "http://127.0.0.1:3000";
-  let redirectTo: string;
-  try {
-    const base = new URL(baseUrl);
-    if (base.protocol !== "https:" && base.hostname !== "127.0.0.1" && base.hostname !== "localhost") {
-      return { error: "APP_BASE_URL must use HTTPS outside local development." };
-    }
-    redirectTo = new URL("/auth/callback?next=%2Finvite%2Faccept", base).toString();
-  } catch {
-    return { error: "APP_BASE_URL is invalid." };
-  }
+  const appBase = resolveAppOrigin("http://127.0.0.1:3000");
+  if (!appBase) return { error: "Invitations are unavailable because the HTTPS app origin is not configured." };
+  const redirectTo = new URL("/auth/callback?next=%2Finvite%2Faccept", appBase).toString();
 
   const { error } = await admin.auth.admin.inviteUserByEmail(email.data, { redirectTo });
   if (error) return { error: "Supabase did not send the invitation. Confirm the address and configured Auth email delivery." };

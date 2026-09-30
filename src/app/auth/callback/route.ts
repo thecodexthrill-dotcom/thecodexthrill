@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { getSupabasePublicEnv } from "@/lib/env";
+import { resolveAppOrigin } from "@/lib/app-origin";
 
 const safeDestinations = new Set(["/reset-password", "/invite/accept"]);
 type LinkStatus = "expired" | "used" | "invalid";
@@ -35,23 +36,17 @@ export async function GET(request: NextRequest) {
     ? requestedNext
     : otpType === "invite" ? "/invite/accept" : otpType === "recovery" ? "/reset-password" : "/auth/continue";
 
-  let redirectBase: URL;
-  try {
-    const configuredBase = new URL(process.env.APP_BASE_URL || request.url);
-    const callbackBase = new URL(request.url);
-    const isLoopback = (host: string) => host === "localhost" || host === "127.0.0.1" || host === "[::1]";
-    if ((configuredBase.protocol !== "https:" && !isLoopback(configuredBase.hostname))
-      || configuredBase.username || configuredBase.password || configuredBase.pathname !== "/" || configuredBase.search || configuredBase.hash) {
-      throw new Error("The configured application origin must use HTTPS.");
-    }
-    // Preserve the callback hostname locally so its session cookies reach the next request.
-    redirectBase = isLoopback(configuredBase.hostname) && isLoopback(callbackBase.hostname)
-      && configuredBase.port === callbackBase.port
-      ? callbackBase
-      : configuredBase;
-  } catch {
+  const configuredBase = resolveAppOrigin(request.url);
+  if (!configuredBase) {
     return NextResponse.json({ error: "The authentication callback base URL is invalid." }, { status: 500 });
   }
+  const callbackBase = new URL(request.url);
+  const isLoopback = (host: string) => host === "localhost" || host === "127.0.0.1" || host === "[::1]";
+  // Preserve the callback hostname locally so its session cookies reach the next request.
+  const redirectBase = isLoopback(configuredBase.hostname) && isLoopback(callbackBase.hostname)
+    && configuredBase.port === callbackBase.port
+    ? callbackBase
+    : configuredBase;
   const redirectOrigin = redirectBase.origin;
 
   const callbackError = url.searchParams.get("error_code") ?? url.searchParams.get("error");

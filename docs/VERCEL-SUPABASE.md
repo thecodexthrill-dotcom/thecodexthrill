@@ -1,51 +1,49 @@
-﻿# Supabase Cloud configuration
+# Supabase Cloud configuration
 
 The application is configured for the existing Supabase Cloud project
 `isgoypmebtoipfvtaflg`. Browser and server clients use the same public project
 URL and publishable key. The privileged server client reads only the
 server-side `SUPABASE_SECRET_KEY` variable.
 
-## Vercel environment variables
+## Existing Vercel project variables
 
-Set these in the existing Vercel project for each required environment. The
-public values are included in browser bundles at build time, so redeploy after
-changing them.
+Configure the existing `thecodexthrill` Vercel project. Public values are
+included in browser bundles at build time, so changing them requires a new
+deployment.
 
 | Variable | Required value | Scope |
 | --- | --- | --- |
-| `NEXT_PUBLIC_SUPABASE_URL` | `https://isgoypmebtoipfvtaflg.supabase.co` | Browser and server |
-| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | The matching publishable key from this Supabase project | Public |
-| `APP_BASE_URL` | The HTTPS origin serving this environment, without a path | Server only |
-| `SUPABASE_SECRET_KEY` | The project `service_role` key, only for audited server-side Auth Admin operations | Server only |
-| `OWNER_SUPER_ADMIN_EMAIL` | The approved Owner email | Server only |
-| `INITIAL_SUPER_ADMIN_BOOTSTRAP_TOKEN` | A unique high-entropy server-only bootstrap token | Server only |
+| `NEXT_PUBLIC_SUPABASE_URL` | `https://isgoypmebtoipfvtaflg.supabase.co` | Production, Preview, Development |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | The matching publishable key from this Supabase project | Production, Preview, Development |
+| `APP_BASE_URL` | `https://thecodexthrill-xi.vercel.app` | Production; local origin for Development |
+| `SUPABASE_SECRET_KEY` | The project `service_role` key for audited server-side Auth Admin operations | Server only, all environments that run those operations |
+| `OWNER_SUPER_ADMIN_EMAIL` | The approved Owner email | Server only, all environments that run bootstrap |
+| `INITIAL_SUPER_ADMIN_BOOTSTRAP_TOKEN` | A unique high-entropy value per environment | Server only, all environments that run bootstrap |
 
-Never add secret keys or bootstrap tokens to `NEXT_PUBLIC_` variables. Do not
-configure an Owner transfer token until the Owner has completed invitation
-acceptance, password setup, and MFA enrollment and the transfer is explicitly
-approved. The existing active designation must be preserved until an audited,
-atomic transfer succeeds.
+Preview callback origins are derived from Vercel's server-only `VERCEL_URL` for
+the current deployment; the Preview environment does not need a fixed
+`APP_BASE_URL`. Never prefix a secret or deployment URL with `NEXT_PUBLIC_`.
+Do not configure an Owner transfer token until the Owner has completed
+invitation acceptance, password setup, and MFA enrollment and the transfer is
+explicitly approved. The existing active designation must be preserved until
+an audited, atomic transfer succeeds.
 
 ## Auth callback origins
 
-Password recovery and invitation callbacks return through
-`/auth/callback`, with the environment's `APP_BASE_URL` as the origin. Use the
-production HTTPS origin for Production and the intended HTTPS Vercel origin for
-Preview. In the hosted Supabase Auth URL configuration, set the Site URL to the
-production origin and allow the exact callback URLs for the Production and
-Preview origins. This repository does not change hosted Auth settings, email
-templates, SMTP settings, database state, or user state.
+Password recovery and invitation callbacks return through `/auth/callback`.
+Production uses `APP_BASE_URL`; Vercel Preview uses the trusted server-side
+`VERCEL_URL` assigned to that deployment. Hosted Supabase Auth uses the
+Production Site URL and allows the exact Production callback, constrained
+project Preview deployment URLs, and localhost development callback. The
+project-scoped redirect allowlist is configured in Supabase Auth.
 
-The current hosted Auth configuration still needs review: its Site URL is a
-localhost origin and its redirect allowlist is empty. Public Auth signup is
-enabled in the project, while this application uses invitation-only access.
-Configure hosted Auth deliberately before sending Owner invitations or recovery
-emails. Custom SMTP/Gmail delivery is also not verified by this repository
-change.
+Public Auth signup is disabled to preserve the invitation-only policy. Custom
+SMTP/Gmail delivery is not configured or verified; do not send Owner email
+until a production SMTP sender is configured and verified.
 
 ## Local development
 
-`.env.local` is configured to target Supabase Cloud. Do not start local
-Supabase/Mailpit or replace the Cloud URL/key with local values. Keep all
-secret values in the ignored `.env.local` or the existing Vercel project's
+The ignored `.env.local` targets Supabase Cloud and the local Next.js origin.
+Do not start local Supabase/Mailpit or replace the Cloud URL/key with local
+values. Keep all secret values in `.env.local` or the existing Vercel project's
 server-only environment configuration.

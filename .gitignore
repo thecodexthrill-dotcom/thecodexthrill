@@ -26,3 +26,5 @@ Thumbs.db
 
 # Supabase local runtime metadata and generated signing keys
 /supabase/.temp/
+.vercel
+.env*
