@@ -26,23 +26,16 @@ export function getSupabasePublicEnv() {
   }
 
   const projectUrl = new URL(url);
-  const isHostedProject =
+  const isApprovedCloudProject =
     projectUrl.protocol === "https:" &&
     projectUrl.hostname === "isgoypmebtoipfvtaflg.supabase.co" &&
     projectUrl.port === "" &&
     projectUrl.pathname === "/" &&
     !projectUrl.search &&
     !projectUrl.hash;
-  const isLocalProject =
-    projectUrl.protocol === "http:" &&
-    ["localhost", "127.0.0.1"].includes(projectUrl.hostname) &&
-    projectUrl.port === "54321" &&
-    projectUrl.pathname === "/" &&
-    !projectUrl.search &&
-    !projectUrl.hash;
 
-  if (!isHostedProject && !isLocalProject) {
-    throw new Error("Supabase URL must target the approved Cloud project or the local development stack.");
+  if (!isApprovedCloudProject) {
+    throw new Error("Supabase URL must target the approved Cloud project.");
   }
 
   return { url, key };
