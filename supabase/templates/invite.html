@@ -1,4 +1,4 @@
 ﻿<h2>You have been invited to TheCodexThrill</h2>
 <p>An administrator invited you to establish your account.</p>
-<p><a href="{{ .SiteURL }}/auth/callback?token_hash={{ .TokenHash }}&amp;type=invite&amp;next=%2Finvite%2Faccept">Accept invitation and set your password</a></p>
+<p><a href="{{ .RedirectTo }}&amp;token_hash={{ .TokenHash }}&amp;type=invite">Accept invitation and set your password</a></p>
 <p>This one-time link expires after the configured period. If it has expired or has already been used, ask an administrator to send a fresh invitation.</p>

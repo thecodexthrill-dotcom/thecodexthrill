@@ -11,7 +11,7 @@ import { updatePasswordAction, type AuthActionState } from "@/lib/supabase/actio
 
 const initialState: AuthActionState = {};
 
-export function PasswordSetupPanel({ sessionValid, linkInvalid, sessionUnavailable }: { sessionValid: boolean; linkInvalid: boolean; sessionUnavailable: boolean }) {
+export function PasswordSetupPanel({ sessionValid, linkStatus, sessionUnavailable }: { sessionValid: boolean; linkStatus: "expired" | "used" | "invalid" | null; sessionUnavailable: boolean }) {
   const [state, formAction, pending] = useActionState(updatePasswordAction, initialState);
   const [password, setPassword] = useState("");
   const [confirmation, setConfirmation] = useState("");
@@ -51,7 +51,7 @@ export function PasswordSetupPanel({ sessionValid, linkInvalid, sessionUnavailab
         <p className="auth-description">Choose a new password for your TheCodexThrill account.</p>
         <div className="auth-notice"><ShieldCheck aria-hidden="true" size={18} /><p>Your password is updated securely through Supabase. Account access still follows your assigned permissions and MFA requirements.</p></div>
 
-        {sessionValid ? (
+        {sessionValid && !linkStatus && !sessionUnavailable ? (
           state.passwordUpdated ? (
             <div aria-live="polite" className="password-result password-result--success" role="status">
               <strong>Password updated successfully.</strong>
@@ -87,8 +87,8 @@ export function PasswordSetupPanel({ sessionValid, linkInvalid, sessionUnavailab
           <div className="module-hold" role="status">
             <ShieldCheck aria-hidden="true" size={18} />
             <div>
-              <strong>{linkInvalid ? "This recovery link is invalid or expired" : sessionUnavailable ? "Secure recovery session could not be established" : "Recovery session required"}</strong>
-              <p>{linkInvalid ? "Recovery links can expire or be used only once. Request a fresh email, then open its link in this browser." : sessionUnavailable ? "Supabase verified the callback but did not confirm a complete browser session. Request a fresh recovery email and open the newest link." : "Open the password recovery link from your email in this browser. Once Supabase verifies it, the password form will appear here."}</p>
+              <strong>{linkStatus === "expired" ? "This recovery link has expired" : linkStatus === "used" ? "This recovery link has already been used" : linkStatus === "invalid" ? "This recovery link is invalid" : sessionUnavailable ? "Secure recovery session could not be established" : "Recovery session required"}</strong>
+              <p>{linkStatus ? "Recovery links expire or can be used only once. Request a fresh email, then open its link in this browser." : sessionUnavailable ? "Supabase verified the callback but did not confirm a complete browser session. Request a fresh recovery email and open the newest link." : "Open the password recovery link from your email in this browser. Once Supabase verifies it, the password form will appear here."}</p>
               <Link href="/forgot-password">Request a fresh recovery email</Link>
             </div>
           </div>

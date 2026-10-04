@@ -1,11 +1,13 @@
 import type { Metadata } from "next";
 import { PageIntro } from "@/components/site/page-intro";
 import { ArticleIndex } from "@/components/site/article-index";
+import { getPageMetadata } from "@/lib/seo";
 
-export const metadata: Metadata = {
-  title: "Insights",
-  description: "Perspectives on product thinking and software engineering.",
-};
+export const metadata: Metadata = getPageMetadata(
+  "Insights",
+  "Perspectives on product thinking and software engineering.",
+  "/blog",
+);
 
 export default function BlogPage() {
   return (

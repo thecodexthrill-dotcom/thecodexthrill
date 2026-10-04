@@ -1,13 +1,13 @@
 import type { Metadata } from "next";
-
-const siteUrl = "https://thecodexthrill.com";
+import { SITE_ORIGIN } from "@/lib/site-origin";
 
 export function getPageMetadata(
   title: string,
   description: string,
   path: string,
 ): Metadata {
-  const url = new URL(path, siteUrl);
+  const url = new URL(path, SITE_ORIGIN);
+  const shareTitle = `${title} | TheCodexThrill`;
   return {
     title,
     description,
@@ -15,10 +15,10 @@ export function getPageMetadata(
     openGraph: {
       type: "website",
       siteName: "TheCodexThrill",
-      title: `${title} | TheCodexThrill`,
+      title: shareTitle,
       description,
       url,
     },
-    twitter: { card: "summary", title: `${title} | TheCodexThrill`, description },
+    twitter: { card: "summary", title: shareTitle, description },
   };
 }

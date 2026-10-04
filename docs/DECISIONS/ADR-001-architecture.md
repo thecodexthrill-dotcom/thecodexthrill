@@ -1,6 +1,6 @@
 # ADR-001: Single-Application Modular Monolith
 
-- **Status:** Accepted as the project baseline; implementation and provider configuration remain pending.
+- **Status:** Accepted baseline; Auth/RBAC implementation is in the repository, while hosted configuration and deployment remain pending.
 - **Date:** 2026-09-28
 - **Decision owners:** Product owner and engineering owner to confirm.
 
@@ -30,9 +30,9 @@ This satisfies the unified-codebase requirement, supports clear domain ownership
 - Route groups and UI state are not authorization boundaries.
 - Approved organization lifecycle: Platform Admin provisions organizations; active/suspended/soft-deleted states; suspension denies tenant access; hard purge is separately reviewed and audited.
 - PWA browser support/cache allowlist and ticket workflow vocabulary/service targets remain open; resolve these before their implementation.
-- Owner-confirmed and approved: UUID identifiers; one base role per active organization membership; separate platform and organization roles; MFA for Super Admin, Platform Admin, Organization Owner, and Organization Admin; platform-owned TheCodexThrill sales leads and tenant-scoped client-organization CRM. The development project is `theCodexthrill` (`isgoypmebtoipfvtaflg`), organization `thecodexthrill-dotcom's Org`, region `ap-northeast-2`; read-only metadata matches. Repository connection remains unconfigured. Audit retention, backup destination/retention/RPO/RTO; invitation issuer permissions/expiry/acceptance/revocation; session expiry/refresh policy; recovery verification method/authority; and initial Super Admin identity/provisioning approval remain open. Resolve these before affected implementation. Recovery details must preserve the exactly-one invariant.
+- Owner-confirmed and approved: UUID identifiers; one base role per active organization membership; separate platform and organization roles; MFA for Super Admin, Platform Admin, Organization Owner, and Organization Admin; platform-owned TheCodexThrill sales leads and tenant-scoped client-organization CRM. The existing Supabase Cloud project `theCodexthrill` (`isgoypmebtoipfvtaflg`) was confirmed by read-only metadata and is now Owner-approved for Vercel Production, superseding the earlier development-only designation. Vercel Production association remains unverified. Audit retention and backup destination/retention/RPO/RTO remain open. Auth/RBAC decisions are recorded in the 2026-10-04 amendment below.
 - Billing, analytics, automation, and AI are future feature areas requiring separate requirements and review; no extra database or service is approved by this ADR.
-- The owner-confirmed Supabase project is dedicated to development/testing and is not production. Its identity is verified, but this ADR does not authorize hosted changes. Provider plan, migrations, operational recovery, and dependency versions remain to be decided before their implementation phases.
+- The earlier development/testing-only project designation was superseded by the Owner-approved 2026-10-04 production target. Hosted changes remain gated on Vercel association and migration-history verification. Provider plan, migrations, operational recovery, and dependency versions remain to be decided before their implementation phases.
 - Future services or non-Postgres stores require a documented rationale and separate reviewed ADR; MongoDB is not approved.
 
 ## Alternatives considered
@@ -45,3 +45,7 @@ This satisfies the unified-codebase requirement, supports clear domain ownership
 ## Open questions and review triggers
 
 Resolve the listed audit and backup policy, remaining identity blockers, data residency, deployment topology, and integration choices before affected work. Revisit this ADR if scale, isolation, regulatory, operational, or product needs materially contradict the modular-monolith assumptions.
+
+## Owner-approved Auth/RBAC amendment — 2026-10-04
+
+The Owner authorized implementation in the existing Next.js App Router application using the existing Supabase Cloud project and Vercel. This supersedes earlier open decisions in this ADR concerning account lifecycle, invitation issuer/expiry/revocation, session refresh, recovery authority, and the initial Super Admin identity. The sole Owner identity is `priyanshugautamji0001@gmail.com`; public signup and direct role assignment remain prohibited. Invitations are single-use, expire within one hour, are audited and revocable; Super Admin and Platform Admin may invite staff roles, while only Super Admin may invite Platform Admin. Supabase Auth owns sessions and recovery; password changes require verified recovery claims. Privileged operations require AAL2. Initial designation and transfer use the existing one-time bootstrap/atomic transfer functions. Cloud project identity must be verified before any hosted change. Repository work does not apply migrations or deploy.

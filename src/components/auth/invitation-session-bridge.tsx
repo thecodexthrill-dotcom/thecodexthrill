@@ -1,9 +1,10 @@
-﻿"use client";
+"use client";
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createBrowserClient } from "@supabase/ssr";
 import { getSupabasePublicEnv } from "@/lib/env";
+import { hasAuthFlowMethod } from "@/lib/supabase/auth-flow";
 
 type InviteStatus = "expired" | "used" | "invalid";
 
@@ -66,11 +67,21 @@ export function InvitationSessionBridge({
         return;
       }
 
-      const { data: userData, error: userError } = await supabase.auth.getUser();
+      const [{ data: userData, error: userError }, { data: claimsData, error: claimsError }] = await Promise.all([
+        supabase.auth.getUser(),
+        supabase.auth.getClaims(),
+      ]);
       if (!active) return;
-      if (userError || !userData.user?.invited_at || !userData.user.email_confirmed_at) {
+      const claims = claimsData?.claims;
+      if (userError || claimsError || !userData.user?.invited_at || !userData.user.email_confirmed_at || !hasAuthFlowMethod(claims?.amr, "invite")) {
         await supabase.auth.signOut();
         setMessage("This link did not verify an invitation. Open the latest invitation from your email.");
+        return;
+      }
+      const { data: invitationValid, error: invitationError } = await supabase.rpc("has_valid_auth_invitation");
+      if (!active) return;
+      if (invitationError || invitationValid !== true) {
+        setMessage("This invitation is expired, revoked, or already used. Contact an administrator for help.");
         return;
       }
       router.refresh();
@@ -85,4 +96,3 @@ export function InvitationSessionBridge({
   if (invitationVerified || !visibleMessage) return null;
   return <p aria-live="polite" className="auth-feedback" role="status">{visibleMessage}</p>;
 }
-

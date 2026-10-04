@@ -6,6 +6,7 @@ import { notFound } from "next/navigation";
 import { PageIntro } from "@/components/site/page-intro";
 import { Button } from "@/components/ui/button";
 import { services } from "@/lib/public-content";
+import { getPageMetadata } from "@/lib/seo";
 
 type Props = { params: Promise<{ slug: string }> };
 
@@ -16,8 +17,10 @@ export function generateStaticParams() {
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { slug } = await params;
   const service = services.find((item) => item.slug === slug);
-  if (!service) return {};
-  return { title: service.title, description: service.description };
+  if (!service) {
+    return { title: "Not found", robots: { index: false, follow: false } };
+  }
+  return getPageMetadata(service.title, service.description, `/services/${service.slug}`);
 }
 
 export default async function ServiceDetailPage({ params }: Props) {

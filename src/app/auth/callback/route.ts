@@ -1,42 +1,30 @@
-import { NextResponse, type NextRequest } from "next/server";
+﻿import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { getSupabasePublicEnv } from "@/lib/env";
 import { resolveAppOrigin } from "@/lib/app-origin";
+import { classifyAuthLinkError } from "@/lib/supabase/auth-link-status";
+import { parseAuthCallbackParams } from "@/lib/supabase/auth-callback";
 
-const safeDestinations = new Set(["/reset-password", "/invite/accept"]);
 type LinkStatus = "expired" | "used" | "invalid";
-type OtpType = "invite" | "recovery" | "email" | "magiclink";
 
 function classifyLinkError(code: string): LinkStatus {
-  const normalized = code.toLowerCase();
-  if (normalized.includes("expired")) return "expired";
-  if (normalized.includes("used") || normalized.includes("already")) return "used";
-  return "invalid";
+  return classifyAuthLinkError(code);
 }
 
 function statusRedirect(destination: string, origin: string, status: LinkStatus | "session-unavailable") {
   const target = destination === "/invite/accept"
     ? `/invite/accept?invite=${status === "session-unavailable" ? "invalid" : status}`
     : destination === "/reset-password"
-      ? `/reset-password?auth=${status === "session-unavailable" ? status : "link-invalid"}`
+      ? `/reset-password?auth=${status === "invalid" ? "link-invalid" : status}`
       : `/login?auth=${status === "session-unavailable" ? status : "link-invalid"}`;
   return NextResponse.redirect(new URL(target, origin));
 }
 
 export async function GET(request: NextRequest) {
   const url = new URL(request.url);
-  const code = url.searchParams.get("code");
-  const tokenHash = url.searchParams.get("token_hash");
-  const rawOtpType = url.searchParams.get("type");
-  const otpType: OtpType | null = rawOtpType === "invite" || rawOtpType === "recovery" || rawOtpType === "email" || rawOtpType === "magiclink"
-    ? rawOtpType
-    : null;
-  const requestedNext = url.searchParams.get("next");
-  const next = requestedNext && safeDestinations.has(requestedNext)
-    ? requestedNext
-    : otpType === "invite" ? "/invite/accept" : otpType === "recovery" ? "/reset-password" : "/auth/continue";
+  const { code, tokenHash, otpType, next } = parseAuthCallbackParams(url.searchParams);
 
-  const configuredBase = resolveAppOrigin(request.url);
+  const configuredBase = resolveAppOrigin(new URL("/", request.url).origin);
   if (!configuredBase) {
     return NextResponse.json({ error: "The authentication callback base URL is invalid." }, { status: 500 });
   }
@@ -60,7 +48,7 @@ export async function GET(request: NextRequest) {
   if (!code && !tokenHash && (next === "/invite/accept" || next === "/reset-password")) {
     const handoffPath = next;
     const nonce = crypto.randomUUID().replaceAll("-", "");
-    const script = 'const target="' + handoffPath + '";const p=new URLSearchParams(window.location.hash.slice(1));if(p.has("error")||p.has("error_code")||p.has("error_description")){if(target==="/reset-password"){window.location.replace(target+"?auth=link-invalid")}else{const c=(p.get("error_code")||p.get("error")||"").toLowerCase();const s=c.includes("expired")?"expired":c.includes("used")||c.includes("already")?"used":"invalid";window.location.replace(target+"?invite="+s)}}else{window.location.replace(target+window.location.hash)}';
+    const script = 'const target="' + handoffPath + '";const p=new URLSearchParams(window.location.hash.slice(1));if(p.has("error")||p.has("error_code")||p.has("error_description")){const c=(p.get("error_code")||p.get("error")||"").toLowerCase();const s=c.includes("expired")?"expired":c.includes("used")||c.includes("already")?"used":"invalid";if(target==="/reset-password"){window.location.replace(target+"?auth="+(s==="invalid"?"link-invalid":s))}else{window.location.replace(target+"?invite="+s)}}else{window.location.replace(target+window.location.hash)}';
     const html = '<!doctype html><html><head><meta charset="utf-8"><title>Continue securely</title></head><body><p>Continuing securely...</p><script nonce="' + nonce + '">' + script + '</script></body></html>';
     const response = new NextResponse(html, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
     response.headers.set("content-security-policy", "default-src 'none'; script-src 'nonce-" + nonce + "'; base-uri 'none'; frame-ancestors 'none'");

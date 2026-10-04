@@ -4,11 +4,13 @@ import { ArrowRight, Check } from "lucide-react";
 
 import { PageIntro } from "@/components/site/page-intro";
 import { Button } from "@/components/ui/button";
+import { getPageMetadata } from "@/lib/seo";
 
-export const metadata: Metadata = {
-  title: "Pricing approach",
-  description: "Understand how TheCodexThrill scopes product and engineering work.",
-};
+export const metadata: Metadata = getPageMetadata(
+  "Pricing approach",
+  "Understand how TheCodexThrill scopes product and engineering work.",
+  "/pricing",
+);
 
 const engagements = [
   { number: "01", title: "Discover", description: "Clarify the problem, users, constraints, and the right first outcome.", items: ["Shared problem framing", "A focused definition of the work", "A clear next-step recommendation"] },

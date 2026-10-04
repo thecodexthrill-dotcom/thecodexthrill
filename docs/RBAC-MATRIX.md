@@ -21,7 +21,7 @@ Organizations are tenants. Users may hold memberships in multiple organizations;
 
 - Exactly one active global Super Admin must exist at every committed operational state. Keep the protected platform unavailable until an explicitly approved initial account is securely provisioned and the invariant established; do not weaken the invariant for an empty database or select/create an account automatically.
 - Successors require explicit authorization, verified identity, and appropriate MFA. Designation transfer must be serialized, atomic, and audited, preserving exactly one active account at every committed operational state. Prevent disabling, deleting, demoting, or removing the current designee except through an authorized transfer that preserves the invariant.
-- Recovery requires verified identity, authorized recovery authority, and audit logging, and must preserve the invariant. The verification procedure and recovery authority are OPEN QUESTIONS; do not implement an unspecified recovery path.
+- Recovery requires verified identity, authorized recovery authority, and audit logging, and must preserve the invariant. Supabase Auth is the sole recovery authority; password changes require a verified recovery session.
 - Super Admin designation is not self-service and cannot be granted by an ordinary role administrator.
 - Delegation is explicit, scoped, time-bounded where practical, auditable, and cannot exceed the delegator's authority.
 - Separate role management from permission grant where appropriate. Enforce mandatory MFA for Super Admin, Platform Admin, Organization Owner, and Organization Admin at server/database boundaries using verified AAL2 sessions.
@@ -30,4 +30,4 @@ Organizations are tenants. Users may hold memberships in multiple organizations;
 
 ## Enforcement and tests
 
-Check access in server use cases and data access, with RLS as a database boundary. Never rely on hidden buttons or route obscurity. Tests must cover unauthenticated, wrong-role, wrong-scope, cross-tenant, ownership, revoked-session, invitation-only access, and exactly-one-active-Super-Admin cases, including concurrent transfer and account-change race conditions. Detailed permission names/scopes and invitation/session/recovery rules remain open.
+Check access in server use cases and data access, with RLS as a database boundary. Never rely on hidden buttons or route obscurity. Tests must cover unauthenticated, wrong-role, wrong-scope, cross-tenant, ownership, revoked-session, invitation-only access, and exactly-one-active-Super-Admin cases, including concurrent transfer and account-change race conditions. Invitation creation is available to Super Admin and Platform Admin with verified AAL2; only Super Admin may invite Platform Admin. Invitations grant only the stored role, expire after one hour, are single-use, and may be revoked. Supabase Auth is the sole recovery and session authority.

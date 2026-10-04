@@ -1,5 +1,7 @@
-﻿import Link from "next/link";
+import Link from "next/link";
 import { InvitationForm } from "@/components/auth/invitation-form";
+import { InvitationRowActions } from "@/components/auth/invitation-row-actions";
+import { PlatformRoleActions } from "@/components/platform/platform-role-actions";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import {
@@ -11,12 +13,12 @@ import {
 
 const sections: Record<string, { title: string; description: string; status: string }> = {
   overview: { title: "Workspace overview", description: "Your workspace entry point and available modules.", status: "Core identity and access foundation" },
-  leads: { title: "Platform sales leads", description: "TheCodexThrill's platform-owned prospect records.", status: "Connected to the development database" },
+  leads: { title: "Platform sales leads", description: "TheCodexThrill's platform-owned prospect records.", status: "Connected to Supabase Cloud" },
   clients: { title: "Organizations", description: "Organizations and current lifecycle state.", status: "Core identity schema" },
   projects: { title: "Projects", description: "Project delivery records and ownership.", status: "Project schema not yet provisioned" },
   tasks: { title: "Tasks", description: "Work items, assignees, and due dates.", status: "Task schema not yet provisioned" },
-  team: { title: "Team", description: "Invited platform users and staff access.", status: "Invitation lifecycle is not yet provisioned" },
-  roles: { title: "Roles & access", description: "Current role assignments and access boundaries.", status: "Role schema is deployed; assignment workflows are not yet available" },
+  team: { title: "Team", description: "Invited platform users and staff access.", status: "Invitation lifecycle is active" },
+  roles: { title: "Roles & access", description: "Current role assignments and access boundaries.", status: "Least-privilege role assignments are managed in Team and enforced by Supabase" },
   content: { title: "CMS pages", description: "Public page content and publication state.", status: "CMS schema not yet provisioned" },
   blog: { title: "Blog", description: "Editorial drafts and publication state.", status: "Blog schema not yet provisioned" },
   portfolio: { title: "Portfolio", description: "Work approved for public display.", status: "Portfolio schema not yet provisioned" },
@@ -42,8 +44,23 @@ export async function WorkspaceContent({ kind, section, notice, roles = [] }: { 
 
   if (kind === "admin" && key === "overview") return <Dashboard roles={roles} />;
 
-  if (kind === "admin" && key === "team") return <section className="module-panel"><p className="eyebrow">INVITATION ONLY</p><h2>Invite a platform user</h2><p>Invitations are sent through Supabase Auth from this trusted server. No role is selected or assigned here; platform and organization access require a separate authorized workflow.</p><InvitationForm /></section>;
-
+  if (kind === "admin" && key === "team") {
+    const supabase = await createClient();
+    const [{ data: invitationData, error: invitationError }, { data: userData, error: userError }] = await Promise.all([
+      supabase.rpc("list_platform_invitations"),
+      supabase.rpc("list_platform_users"),
+    ]);
+    const invitations = (invitationData ?? []) as { id: string; email: string; role: string; status: string; created_at: string; expires_at: string }[];
+    const users = (userData ?? []) as { user_id: string; email: string; display_name: string | null; roles: string[]; created_at: string; email_confirmed: boolean }[];
+    const canAssignPlatformAdmin = roles.includes("super_admin");
+    return <div className="workspace-content">
+      <section className="module-panel"><p className="eyebrow">INVITATION ONLY</p><h2>Invite a platform user</h2><p>Invitations bind a one-hour, single-use role. Only the Super Admin can invite a Platform Admin; Super Admin and Platform Admin can invite Developer or Support Staff.</p><InvitationForm /></section>
+      <section className="module-panel"><h2>Staff accounts</h2><p>Platform roles require a confirmed invited account and verified MFA. Role changes are audited and enforced by Supabase.</p>
+        {userError ? <p className="module-alert" role="alert">Staff records are unavailable under this session. Verify the account has platform administration access and an AAL2 session.</p> : users.length === 0 ? <p className="module-empty">No invited staff accounts are available.</p> : <div className="module-table-wrap"><table className="module-table"><thead><tr><th>Account</th><th>Platform role</th><th>Joined</th><th>Manage role</th></tr></thead><tbody>{users.map((user) => <tr key={user.user_id}><td><strong>{user.display_name || user.email.split("@")[0]}</strong><small>{user.email}{user.email_confirmed ? " · Email confirmed" : " · Email not confirmed"}</small></td><td>{user.roles.length ? user.roles.map((role) => role.replaceAll("_", " ")).join(", ") : "No platform role"}</td><td>{new Date(user.created_at).toLocaleDateString()}</td><td><PlatformRoleActions canAssignPlatformAdmin={canAssignPlatformAdmin} emailConfirmed={user.email_confirmed} roles={user.roles} userId={user.user_id} /></td></tr>)}</tbody></table></div>}
+      </section>
+      <section className="module-panel"><h2>Recent invitations</h2>{invitationError ? <p className="module-note">Invitation records are unavailable under this session.</p> : invitations.length === 0 ? <p className="module-empty">No invitations yet.</p> : <div className="module-table-wrap"><table className="module-table"><thead><tr><th>Email</th><th>Role</th><th>Status</th><th>Expires</th><th>Action</th></tr></thead><tbody>{invitations.map((invitation) => <tr key={invitation.id}><td>{invitation.email}</td><td>{invitation.role.replaceAll("_", " ")}</td><td>{invitation.status}</td><td>{new Date(invitation.expires_at).toLocaleString()}</td><td>{(invitation.status === "pending" || invitation.status === "expired") && <InvitationRowActions canRevoke={invitation.status === "pending"} id={invitation.id} />}</td></tr>)}</tbody></table></div>}</section>
+    </div>;
+  }
   if (kind === "admin" && key === "leads") {
     const supabase = await createClient();
     const { data, error } = await supabase.from("platform_sales_leads")

@@ -5,7 +5,7 @@ import { issueOwnerBootstrapToken, verifyOwnerBootstrapToken } from "./bootstrap
 
 const secret = "local-test-only-signing-secret-which-is-at-least-32-bytes";
 const migration = readFileSync("supabase/migrations/20260929142302_auth_invitation_bootstrap.sql", "utf8").replace(String.fromCharCode(0xfeff), "");
-const foundation = readFileSync("supabase/migrations/20260929112500_foundation_identity_tenancy.sql", "utf8");
+const foundation = readFileSync("supabase/migrations/20260929131309_foundation_identity_tenancy.sql", "utf8");
 const functionBody = (name: string, source = migration) => {
   const start = source.indexOf(`create function public.${name}`);
   assert.notEqual(start, -1, `missing function ${name}`);

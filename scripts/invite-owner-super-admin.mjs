@@ -9,17 +9,17 @@ loadEnvConfig(process.cwd());
 const appBase = process.env.APP_BASE_URL;
 const email = process.env.OWNER_SUPER_ADMIN_EMAIL;
 const signingSecret = process.env.OWNER_SUPER_ADMIN_TRANSFER_TOKEN;
-if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !signingSecret) {
-  console.error("Set OWNER_SUPER_ADMIN_EMAIL and OWNER_SUPER_ADMIN_TRANSFER_TOKEN in local .env.local.");
+if (email?.toLowerCase() !== "priyanshugautamji0001@gmail.com" || !signingSecret) {
+  console.error("Set OWNER_SUPER_ADMIN_EMAIL and OWNER_SUPER_ADMIN_TRANSFER_TOKEN in approved Vercel environment.");
   process.exit(2);
 }
 let base;
 try { base = new URL(appBase ?? ""); } catch {
-  console.error("APP_BASE_URL must point to the local development app.");
+  console.error("APP_BASE_URL must point to the approved production app.");
   process.exit(2);
 }
-if (base.protocol !== "http:" || !["localhost", "127.0.0.1"].includes(base.hostname) || base.port !== "3000") {
-  console.error("Owner provisioning is restricted to http://localhost:3000 or http://127.0.0.1:3000.");
+if (base.origin !== "https://thecodexthrill.com") {
+  console.error("Owner transfer is restricted to https://thecodexthrill.com.");
   process.exit(2);
 }
 let prompt;
@@ -42,7 +42,7 @@ try {
     method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: "{}",
   });
 } catch {
-  console.error("Local owner invitation request failed to connect. The token was not printed."); process.exit(1);
+  console.error("Owner invitation request failed to connect. The token was not printed."); process.exit(1);
 }
 const result = await response.json().catch(() => ({}));
 console.log(`HTTP ${response.status}: ${result.message ?? result.error ?? "Request completed."}`);

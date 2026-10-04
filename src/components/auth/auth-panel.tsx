@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useActionState } from "react";
 import Link from "next/link";
@@ -29,11 +29,13 @@ export function AuthPanel({
   invitationVerified = false,
   passwordResetVerified = false,
   passwordResetLinkInvalid = false,
+  logoutError = false,
 }: {
   mode: AuthMode;
   invitationVerified?: boolean;
   passwordResetVerified?: boolean;
   passwordResetLinkInvalid?: boolean;
+  logoutError?: boolean;
 }) {
   const action = mode === "forgot"
     ? requestPasswordResetAction
@@ -68,6 +70,7 @@ export function AuthPanel({
         ) : (
           <div className="module-hold"><ShieldCheck aria-hidden="true" size={18} /><div><strong>Password recovery link required</strong><p>{passwordResetLinkInvalid ? "This recovery link expired or was already used. Request a fresh link and open it before choosing a password." : "Open the secure password recovery link from your email before choosing a password."}</p><Link href="/forgot-password">Request a new recovery link</Link></div></div>
         )}
+        {logoutError && <p aria-live="polite" className="auth-feedback" role="alert">Sign-out could not be confirmed with Supabase. Try again and close this browser session.</p>}
         {state.error && <p aria-live="polite" className="auth-feedback" role="alert">{state.error}</p>}
         {state.message && <p aria-live="polite" className="auth-feedback" role="status">{state.message}</p>}
         <div className="auth-links">

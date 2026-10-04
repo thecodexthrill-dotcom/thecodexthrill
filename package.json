@@ -1,4 +1,4 @@
-{
+﻿{
   "name": "thecodexthrill",
   "version": "0.1.0",
   "private": true,
@@ -12,6 +12,7 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test:bootstrap": "node --experimental-strip-types --test src/lib/supabase/bootstrap-token.test.ts",
+    "test:auth": "node --experimental-strip-types --test src/lib/supabase/bootstrap-token.test.ts src/lib/supabase/auth-link-status.test.ts src/lib/supabase/invitation-link.test.ts src/lib/supabase/invitation-email-status.test.ts src/lib/supabase/auth-flow.test.ts src/lib/supabase/platform-invitations.test.ts src/lib/supabase/platform-role-management.test.ts",
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\" \"*.{json,mjs,ts}\"",
     "format:check": "prettier --check \"src/**/*.{ts,tsx,css}\" \"*.{json,mjs,ts}\""
   },

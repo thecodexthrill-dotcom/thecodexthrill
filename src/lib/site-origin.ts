@@ -1,0 +1,1 @@
+export const SITE_ORIGIN = "https://thecodexthrill.com" as const;

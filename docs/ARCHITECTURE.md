@@ -1,12 +1,12 @@
 # Architecture Baseline
 
-**Status:** Baseline approved; application integration and provider configuration remain pending.
+**Status:** Application Auth/RBAC integration implemented in the repository; Cloud deployment and provider verification remain pending.
 
 ## 1. System shape
 
 One Next.js App Router application using React and strict TypeScript, organized as a modular monolith. The same deployment and codebase serve public pages, customer routes, internal operations, Admin, and Super Admin. Route groups/layouts organize presentation; they are not security boundaries.
 
-Planned platform: Supabase Cloud, PostgreSQL, Supabase Auth, and Supabase Storage. The owner confirmed the dedicated development/testing project `theCodexthrill` (`isgoypmebtoipfvtaflg`) in organization `thecodexthrill-dotcom's Org`, region `ap-northeast-2`; it is not a production workload. Read-only metadata matched this identity. Repository connection remains unconfigured: public Supabase URL and publishable key are blank, and no project credentials are committed. Do not connect or modify hosted resources until configuration and the required implementation gates are reviewed. Planned UI: Tailwind CSS, shadcn/ui, Radix UI, Lucide icons, and Motion for restrained animations. Hosting target: Vercel. Versions, plans, and provider configuration are not selected or provisioned here.
+Platform: Supabase Cloud, PostgreSQL, and Supabase Auth, with Vercel hosting. The Owner now approves the existing project `theCodexthrill` (`isgoypmebtoipfvtaflg`) for Production; this supersedes the earlier dev/testing-only decision. A read-only CLI listing confirmed matching project name, ref, region, and healthy status. The Vercel project is not linked in this workspace, so its Production target still requires external verification. No hosted resource has been changed. Planned UI: Tailwind CSS, shadcn/ui, Radix UI, Lucide icons, and Motion for restrained animations. Hosting target: Vercel. Versions, plans, and provider configuration are not selected or provisioned here.
 
 The single application is also planned as an installable PWA, with a minimal offline fallback and opt-in web push. Service-worker caching must use an explicit allowlist; authenticated or otherwise sensitive data is excluded by default. Push is a convenience channel, not the source of truth.
 
@@ -26,7 +26,7 @@ Browser input, URL parameters, uploaded files, CMS content, external links, push
 
 Enforce authorization in server actions/route handlers and data access, and enforce row access through PostgreSQL RLS. UI visibility is usability only. Organization is the tenant boundary. A user may belong to multiple organizations, with memberships and roles scoped to each organization; tenant business data must be isolated. Tenant identity must be derived from verified membership, never trusted from a client-supplied tenant ID. Internal staff operate through platform-level permissions and may separately hold organization memberships; ordinary organization membership never implies platform privileges. Global platform administration is separate from tenant roles.
 
-Exactly one active global Super Admin must exist at every committed operational state. Do not automatically select or create the initial account. Keep the protected platform unavailable until an explicitly approved initial account is securely provisioned and the invariant is established. Successors require explicit authorization, verified identity, and appropriate MFA. Transfer must be atomic, serialized, and audited. Recovery must use authorized recovery authority, verified identity, and audit logging while preserving the invariant; its verification procedure remains undecided.
+Exactly one active global Super Admin must exist at every committed operational state. Do not automatically select or create the initial account. Keep the protected platform unavailable until an explicitly approved initial account is securely provisioned and the invariant is established. Successors require explicit authorization, verified identity, and appropriate MFA. Transfer must be atomic, serialized, and audited. Supabase Auth is the sole recovery authority. Password changes require a verified recovery AMR session and AAL2 when a verified TOTP factor exists.
 
 ## 4. Data and integration principles
 
@@ -46,4 +46,4 @@ Strict typing, clear feature ownership, accessibility, reduced motion, responsiv
 
 ## 8. Boundaries and unresolved architecture questions
 
-The organization-based tenant model and separate platform administration are approved. The development project identity, organization lifecycle, membership role model, role namespace separation, specified mandatory MFA roles, and platform/tenant CRM boundaries are confirmed. Audit retention and backup destination/retention/recovery objectives remain pending as described in the database specification. Deployment topology, data residency, cache strategy, search provider, background jobs, email/web-push providers, and observability vendors remain open. PWA browser support and safe cache allowlist, ticket workflow vocabulary and service targets, invitation/session policy details, recovery verification method/authority, and initial Super Admin identity/provisioning approval also require decisions. Resolve them before affected implementation; record material changes as ADRs.
+The organization-based tenant model, role namespaces, approved MFA roles and platform/tenant CRM boundaries remain the architecture baseline. Audit retention and backup destination/retention/recovery objectives remain pending. Data residency, cache strategy, search provider, background jobs, notification providers, observability, PWA browser support and ticket service targets remain open. The Owner has approved Auth/RBAC policy and the designated initial Super Admin; repository implementation uses the existing Cloud project. Vercel Production association and hosted changes remain gated.

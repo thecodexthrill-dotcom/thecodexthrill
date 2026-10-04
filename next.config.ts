@@ -2,6 +2,16 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  async redirects() {
+    return [
+      {
+        source: "/:path*",
+        has: [{ type: "host", value: "www.thecodexthrill.com" }],
+        destination: "https://thecodexthrill.com/:path*",
+        permanent: true,
+      },
+    ];
+  },
   allowedDevOrigins: ["127.0.0.1"],
   logging: { incomingRequests: { ignore: [/\/auth\/callback/] } },
   async headers() {

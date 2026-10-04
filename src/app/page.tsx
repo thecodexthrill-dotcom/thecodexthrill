@@ -13,6 +13,8 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { ServiceCard } from "@/components/site/service-card";
 
+export const metadata = { alternates: { canonical: "/" } };
+
 const capabilities = [
   {
     title: "Web applications",

@@ -2,7 +2,7 @@
 
 **Build. Innovate. Deploy. Scale.**
 
-TheCodexThrill is a premium software development company platform. Its application foundation is under development in this repository, following the documentation baseline and architecture decisions below. No external services or production resources are configured.
+TheCodexThrill is a software development company platform built with Next.js App Router and Supabase Cloud. Production uses the canonical origin `https://thecodexthrill.com`; local application development runs on localhost and does not make localhost a production Auth redirect.
 
 ## Product direction
 
@@ -24,11 +24,11 @@ The product is planned as one installable PWA and modular monolith: a public com
 - [Changelog](docs/CHANGELOG.md)
 - [Decisions](docs/DECISIONS/ADR-001-architecture.md)
 
-## Current status
+## Current configuration
 
-Phase 1 source and configuration scaffolding has started. This workspace did not have Node.js or a package manager available when work began, so dependencies could not be installed and runtime verification has not run. Supabase clients are prepared but are not connected; no Auth flow or live backend is claimed.
+The browser and server Supabase clients are configured for the approved Cloud project through environment variables. Authentication callback URLs are resolved from `APP_BASE_URL` in Production and the deployment URL in Vercel Preview. The production resolver rejects localhost and any production origin other than `https://thecodexthrill.com`. Local Next.js development can use `http://localhost:3000`.
 
-### Initial repository audit — 2026-09-28
+### Initial repository audit â€” 2026-09-28
 
 The workspace contained no files or folders before this documentation baseline was added. No Git repository was initialized, so Git status and pre-existing uncommitted changes could not be determined. No application framework, dependency manifests, source tree, project configuration, Supabase configuration, database migrations, or prior documentation were present. No existing work was overwritten or deleted.
 
@@ -36,6 +36,6 @@ The workspace contained no files or folders before this documentation baseline w
 
 ## Local development
 
-Requires Node.js 20.9 or newer and npm. Install dependencies with `npm install`, copy `.env.example` to `.env.local`, fill in only approved non-production Supabase URL and publishable key values when available, then run `npm run dev` and open `http://localhost:3000`. Never place service-role or secret keys in `NEXT_PUBLIC_*` variables. Without Supabase values, the public pages can run; Supabase clients throw a clear configuration error only if called.
+Requires Node.js 20.9 or newer and npm. Install dependencies with `npm install`, provide the approved Supabase Cloud URL and publishable key in the ignored `.env.local`, set `APP_BASE_URL=http://localhost:3000` for local Next.js callback testing, then run `npm run dev`. The browser and server clients use the configured Cloud project; the application backend remains the existing Supabase Cloud project. Never place service-role or secret keys in `NEXT_PUBLIC_*` variables.
 
 `npm run lint`, `npm run typecheck`, and `npm run build` are the foundation checks. They have not yet been run because Node.js/npm are unavailable in the current environment. No lockfile exists until dependency installation is performed. No Git repository was initialized.

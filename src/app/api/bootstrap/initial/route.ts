@@ -29,8 +29,8 @@ export async function POST(request: NextRequest) {
   const parsed = z.object({ email: z.string().trim().email().max(320) }).safeParse(body);
   if (!parsed.success) return NextResponse.json({ error: "A valid owner-approved email is required." }, { status: 400 });
   const configuredOwnerEmail = process.env.OWNER_SUPER_ADMIN_EMAIL?.trim().toLowerCase();
-  if (!configuredOwnerEmail || parsed.data.email.toLowerCase() !== configuredOwnerEmail) {
-    return NextResponse.json({ error: "The requested account does not match the configured Owner identity." }, { status: 403 });
+  if (configuredOwnerEmail !== "priyanshugautamji0001@gmail.com" || parsed.data.email.toLowerCase() !== configuredOwnerEmail) {
+    return NextResponse.json({ error: "The requested account does not match the designated Owner identity." }, { status: 403 });
   }
 
   let admin;

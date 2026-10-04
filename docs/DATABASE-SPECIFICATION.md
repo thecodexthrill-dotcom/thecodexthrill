@@ -2,7 +2,7 @@
 
 ## Status and boundaries
 
-Repository proposal only; no migration, SQL, Auth, credential, or hosted resource changes are included. The owner-confirmed development project is `theCodexthrill` (`isgoypmebtoipfvtaflg`), organization `thecodexthrill-dotcom's Org`, region `ap-northeast-2`. Its project identity was matched by read-only metadata in the prior verification. The owner identifies it as development/testing only. The repository remains unconfigured and must not connect to it without separate review.
+This document records the original schema decisions. Foundation, bootstrap and transfer migrations already exist in the repository; the Auth/RBAC implementation adds a follow-up platform invitation migration. Read-only Supabase CLI metadata confirmed project `theCodexthrill` (`isgoypmebtoipfvtaflg`), region `ap-northeast-2`, healthy and linked. The Owner now approves this existing project for Vercel Production, superseding the earlier development/testing-only designation. Vercel is not linked here. No remote migration, Auth, or project resource has been changed.
 
 ## A. Approval matrix
 
@@ -115,4 +115,4 @@ For each test, use distinct synthetic users across two organizations plus platfo
 2. Select backup destination and model: confirm the project's actual subscription capabilities; choose managed backup/PITR, an owner-controlled encrypted export destination, or both; approve Storage object-byte export method, retention, access/key custody, and deletion handling.
 3. Approve database and Storage RPO/RTO targets and restore-test frequency. Suggested development defaults are 24-hour RPO / 1-business-day RTO, 30 daily exports and six monthly points if destination/cost/privacy permit; these are not assumed capabilities or commitments.
 
-Invitation lifecycle, session expiry/refresh, recovery verification/authority, and the initial Super Admin identity/bootstrap remain separate blockers for Auth and protected-platform implementation. This proposal does not authorize migration creation/application, user or invitation creation, Auth changes, credentials, or hosted writes.
+The Owner approved invitation permissions and lifecycle, Supabase Auth sessions/recovery, and the designated initial Owner identity. The additive invitation migration remains unapplied pending Vercel Production identity verification and review of the Cloud migration history. Repository implementation does not create users, send invitations, or alter hosted Auth/data.

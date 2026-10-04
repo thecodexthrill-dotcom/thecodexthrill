@@ -5,7 +5,7 @@
 
 ## 1. Product summary
 
-TheCodexThrill is a software development company platform for presenting services and work, publishing managed content, receiving and managing enquiries, coordinating client projects, and governing internal operations. The public brand is premium black, white, metallic gold, and refined neutrals. Tagline: “Build. Innovate. Deploy. Scale.”
+TheCodexThrill is a software development company platform for presenting services and work, publishing managed content, receiving and managing enquiries, coordinating client projects, and governing internal operations. The public brand is premium black, white, metallic gold, and refined neutrals. Tagline: â€œBuild. Innovate. Deploy. Scale.â€
 
 The target is one cohesive application and codebase. Public visitors, customers, staff, administrators, and the global Super Admin use distinct routes and authorization boundaries within that application. Organizations are tenants; users may belong to multiple organizations, with membership and roles scoped to each organization. Tenant business data is isolated. Internal platform staff use platform-level permissions and may separately hold organization memberships; global platform administration is separate from tenant roles.
 
@@ -46,7 +46,7 @@ Manage title, slug, description, cover and gallery, technology, category, indust
 
 ### Identity and governance
 
-Invitation-only registration, login, email verification, password recovery, secure sessions, mandatory MFA for Super Admin, Platform Admin, Organization Owner, and Organization Admin, session revocation, protected routes, user and role administration, permissions, controlled delegation, access scopes, security settings, CMS authorization, configuration, and audit logs. Unrestricted public account registration is prohibited; public enquiry forms are separate from account registration. No real invitations or account creation without explicit authorization. Invitation issuer permissions, expiry, acceptance and revocation; session expiry/refresh; recovery verification method and authority; and initial Super Admin identity/provisioning approval remain open.
+Invitation-only registration, login, email verification, password recovery, secure sessions, mandatory MFA for Super Admin, Platform Admin, Organization Owner, and Organization Admin, session revocation, protected routes, user and role administration, permissions, controlled delegation, access scopes, security settings, CMS authorization, configuration, and audit logs. Unrestricted public account registration is prohibited; public enquiry forms are separate from account registration. The Owner authorized invitation-only onboarding: Super Admin and Platform Admin may invite staff roles; only Super Admin may invite Platform Admin. Invitations are audited, one-hour, single-use and revocable. Supabase Auth owns sessions and recovery; password changes require verified recovery claims and AAL2 when a TOTP factor exists. The designated initial Owner is priyanshugautamji0001@gmail.com.
 
 ### CRM
 

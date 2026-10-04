@@ -30,7 +30,7 @@ let email;
 let confirmation;
 if (stdin.isTTY) {
   const prompt = createInterface({ input: stdin, output: stdout });
-  email = (await prompt.question("Owner-approved administrator email: ")).trim();
+  email = (await prompt.question("Owner email (priyanshugautamji0001@gmail.com): ")).trim();
   confirmation = (await prompt.question("Type INVITE to send this one-time invitation: ")).trim();
   prompt.close();
 } else {
@@ -39,10 +39,10 @@ if (stdin.isTTY) {
   const [emailLine, confirmationLine] = pipedInput.split(/\r?\n/);
   email = (emailLine ?? "").trim();
   confirmation = (confirmationLine ?? "").trim();
-  stdout.write("Owner-approved administrator email: " + email + "\n");
+  stdout.write("Owner email (priyanshugautamji0001@gmail.com): " + email + "\n");
   stdout.write("Type INVITE to send this one-time invitation: " + confirmation + "\n");
 }
-if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || confirmation !== "INVITE") {
+if (email.toLowerCase() !== "priyanshugautamji0001@gmail.com" || confirmation !== "INVITE") {
   console.error("No invitation sent.");
   process.exit(2);
 }
