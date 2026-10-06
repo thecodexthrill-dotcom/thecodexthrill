@@ -63,6 +63,7 @@ const pageContent: Record<string, { title: string; description: string }> = {
   support: { title: "Support", description: "Ticket queues and support ownership." },
   files: { title: "Files", description: "Documents controlled by verified ownership." },
   billing: { title: "Billing", description: "Invoices and payment status." },
+  invoices: { title: "Invoices", description: "Billing statements and payment confirmations." },
   analytics: { title: "Analytics", description: "Reports from connected, validated records." },
   notifications: { title: "Notifications", description: "Notification history for this account." },
   settings: { title: "Settings", description: "Account and workspace settings." },

@@ -1,4 +1,4 @@
-﻿"use server";
+"use server";
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
@@ -11,6 +11,9 @@ import { resolveAppOrigin } from "@/lib/app-origin";
 import { hasAuthFlowMethod } from "@/lib/supabase/auth-flow";
 import { invitationRedirectTo } from "@/lib/supabase/invitation-link";
 import { invitationEmailFailureMessage, safeInvitationEmailCode } from "@/lib/supabase/invitation-email-status";
+import { safeInvitationListErrorCode } from "@/lib/supabase/invitation-list-status";
+import { hasFreshInvitationSession } from "@/lib/supabase/invitation-handoff";
+import { cookies } from "next/headers";
 
 export type AuthActionState = { error?: string; message?: string; passwordUpdated?: boolean };
 
@@ -110,19 +113,22 @@ export async function acceptInvitationAction(
     return { error: "The passwords do not match." };
   }
 
+  const cookieStore = await cookies();
   const supabase = await createClient();
   const { data: claimsData, error: claimsError } = await supabase.auth.getClaims();
   const claims = claimsData?.claims;
-  const isInviteSession = hasAuthFlowMethod(claims?.amr, "invite");
+  const handoffSubject = cookieStore.get("ctt_invite_verified")?.value;
+  const isInviteSession = hasAuthFlowMethod(claims?.amr, "invite") && hasFreshInvitationSession(handoffSubject, claims?.sub, claims?.amr);
   const { data: invitationValid, error: invitationError } = await supabase.rpc("has_valid_auth_invitation");
   const { data: platformInvitation } = await supabase.rpc("has_valid_platform_invitation");
-  if (claimsError || !claims?.sub || !isInviteSession || invitationError || invitationValid !== true) return { error: "Open a valid, unused invitation sent by an authorized administrator." };
+  if (claimsError || !claims?.sub || !isInviteSession || invitationError || invitationValid !== true) return { error: "Open the latest valid invitation link and use its Continue button before setting the password." };
   const { error: passwordError } = await supabase.auth.updateUser({ password: parsed.data.password });
   if (passwordError) return { error: "Password setup failed. Ask an administrator to review the pending invitation." };
   if (platformInvitation === true) {
     const { error: acceptError } = await supabase.rpc("accept_platform_invitation");
     if (acceptError) return { error: "The invitation could not be accepted. Ask an administrator to review its status." };
   }
+  cookieStore.delete("ctt_invite_verified");
   redirect("/auth/continue");
 }
 
@@ -167,7 +173,7 @@ export async function inviteUserAction(
   }
 
   const redirectTo = invitationRedirectTo(appBase);
-  const { error } = await admin.auth.admin.inviteUserByEmail(parsed.data.email, { redirectTo });
+  const { data: invited, error } = await admin.auth.admin.inviteUserByEmail(parsed.data.email, { redirectTo });
   if (error) {
     await supabase.rpc("revoke_platform_invitation", { p_invitation_id: invitationId });
     console.error("[auth.invitation] Supabase Auth rejected invitation email request", {
@@ -176,6 +182,14 @@ export async function inviteUserAction(
     });
     return { error: `${invitationEmailFailureMessage(error)} The recorded invitation was revoked.` };
   }
+  if (invited.user?.id) {
+    const { error: linkError } = await supabase.rpc("link_platform_invitation_auth_user", {
+      p_invitation_id: invitationId,
+      p_auth_user_id: invited.user.id,
+    });
+    if (linkError) console.error("[auth.invitation] Auth user linkage failed", { code: safeInvitationListErrorCode(linkError.code) });
+  }
+  revalidatePath("/admin/team");
   return { message: `Supabase accepted the invitation email request for the ${parsed.data.role.replaceAll("_", " ")} role. Email delivery is handled by Supabase Auth and is not confirmed by this response. The invitation expires in one hour and is single-use.` };
 }
 
@@ -187,7 +201,10 @@ export async function resendPlatformInvitationAction(_previousState: AuthActionS
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("resend_platform_invitation", { p_invitation_id: parsed.data });
   const invitation = Array.isArray(data) ? data[0] : null;
-  if (error || !invitation?.id || !invitation.email || !invitation.role) return { error: "The invitation could not be rotated. It may no longer be pending or your role may not authorize it." };
+  if (error || !invitation?.id || !invitation.email || !invitation.role) {
+    if (error) console.error("[admin.team.invitations] resend RPC failed", { code: safeInvitationListErrorCode(error.code) });
+    return { error: error ? `Supabase rejected the resend request (reference ${safeInvitationListErrorCode(error.code)}). Verify your Super Admin or Platform Admin access and MFA, then retry.` : "The invitation could not be rotated. It may no longer be pending or your role may not authorize it." };
+  }
   let admin;
   try { admin = createAdminClient(); }
   catch { await supabase.rpc("revoke_platform_invitation", { p_invitation_id: invitation.id }); return { error: "The server-only Supabase credential is unavailable; the new invitation was revoked." }; }
@@ -205,7 +222,7 @@ export async function resendPlatformInvitationAction(_previousState: AuthActionS
   const appBase = resolveAppOrigin();
   if (!appBase) { await supabase.rpc("revoke_platform_invitation", { p_invitation_id: invitation.id }); return { error: "The secure application origin is unavailable; the new invitation was revoked." }; }
   const redirectTo = invitationRedirectTo(appBase);
-  const { error: sendError } = await admin.auth.admin.inviteUserByEmail(invitation.email, { redirectTo });
+  const { data: resentUser, error: sendError } = await admin.auth.admin.inviteUserByEmail(invitation.email, { redirectTo });
   if (sendError) {
     await supabase.rpc("revoke_platform_invitation", { p_invitation_id: invitation.id });
     console.error("[auth.invitation] Supabase Auth rejected invitation resend", {
@@ -214,19 +231,48 @@ export async function resendPlatformInvitationAction(_previousState: AuthActionS
     });
     return { error: `${invitationEmailFailureMessage(sendError)} The rotated invitation was revoked.` };
   }
+  if (resentUser.user?.id) {
+    const { error: linkError } = await supabase.rpc("link_platform_invitation_auth_user", {
+      p_invitation_id: invitation.id,
+      p_auth_user_id: resentUser.user.id,
+    });
+    if (linkError) console.error("[auth.invitation] Auth user linkage failed after resend", { code: safeInvitationListErrorCode(linkError.code) });
+  }
   revalidatePath("/admin/team");
   return { message: `Supabase accepted a fresh invitation email request for the existing ${invitation.role.replaceAll("_", " ")} account. Email delivery is handled by Supabase Auth and is not confirmed by this response.` };
  }
 
-export async function revokePlatformInvitationAction(formData: FormData) {
+export async function revokePlatformInvitationAction(_previousState: AuthActionState, formData: FormData): Promise<AuthActionState> {
   const parsed = z.string().uuid().safeParse(formData.get("id"));
-  if (!parsed.success) return;
-  await requireWorkspace("admin", ["team"]);
+  if (!parsed.success) return { error: "Select a valid invitation." };
+  const { roles } = await requireWorkspace("admin", ["team"]);
+  if (!roles.some((role) => role === "super_admin" || role === "platform_admin")) redirect("/access-denied");
   const supabase = await createClient();
-  await supabase.rpc("revoke_platform_invitation", { p_invitation_id: parsed.data });
+  const { data, error } = await supabase.rpc("revoke_platform_invitation", { p_invitation_id: parsed.data });
+  if (error) {
+    console.error("[admin.team.invitations] revoke RPC failed", { code: safeInvitationListErrorCode(error.code) });
+    return { error: "Supabase rejected the revoke request (reference " + safeInvitationListErrorCode(error.code) + "). Verify your Super Admin or Platform Admin access and MFA, then retry." };
+  }
+  if (data !== true) return { error: "This invitation is no longer pending, so it was not revoked." };
   revalidatePath("/admin/team");
+  return { message: "Invitation revoked." };
 }
 
+export async function archivePlatformInvitationAction(_previousState: AuthActionState, formData: FormData): Promise<AuthActionState> {
+  const parsed = z.string().uuid().safeParse(formData.get("id"));
+  if (!parsed.success) return { error: "Select a valid invitation." };
+  const { roles } = await requireWorkspace("admin", ["team"]);
+  if (!roles.some((role) => role === "super_admin" || role === "platform_admin")) redirect("/access-denied");
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("archive_platform_invitation", { p_invitation_id: parsed.data });
+  if (error) {
+    console.error("[admin.team.invitations] archive RPC failed", { code: safeInvitationListErrorCode(error.code) });
+    return { error: "Supabase rejected the archive request (reference " + safeInvitationListErrorCode(error.code) + "). Verify your administrator access and MFA, then retry." };
+  }
+  if (data !== true) return { error: "Only expired, accepted, or revoked invitation records can be archived." };
+  revalidatePath("/admin/team");
+  return { message: "Invitation record archived; user accounts and roles were not changed." };
+}
 export async function bootstrapInitialSuperAdminAction() {
   const supabase = await createClient();
   const { data: { user }, error: userError } = await supabase.auth.getUser();

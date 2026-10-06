@@ -3,24 +3,41 @@ import { ArrowUpRight, Menu } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/site/theme-toggle";
+import { HeaderAuthAction } from "@/components/site/header-auth-action";
 
 const navigation = [
+  { href: "/", label: "Home" },
   { href: "/services", label: "Services" },
   { href: "/portfolio", label: "Work" },
+  { href: "/about", label: "About" },
   { href: "/blog", label: "Insights" },
   { href: "/pricing", label: "Pricing" },
-  { href: "/about", label: "About" },
+  { href: "/contact", label: "Contact Us" },
 ];
 
 function Brand() {
   return (
     <Link aria-label="TheCodexThrill home" className="brand-lockup" href="/">
-      <span aria-hidden="true" className="brand-mark">
-        C<span>.</span>
+      <span aria-hidden="true" className="brand-mark-symbol">
+        <svg width="30" height="30" viewBox="0 0 96 96" fill="none">
+          <defs>
+            <linearGradient id="header-gold-gradient" x1="19" y1="18" x2="76" y2="80" gradientUnits="userSpaceOnUse">
+              <stop stopColor="#F2C777" />
+              <stop offset="1" stopColor="#A96E24" />
+            </linearGradient>
+          </defs>
+          <path d="M12 21h47L46 35H25v40H12V21Z" fill="currentColor" />
+          <path d="M53 15h27L58 37v37L44 87V39l9-9V15Z" fill="url(#header-gold-gradient)" />
+          <path d="M62 20h22L67 37l18 20H63L49 42l13-13V20Z" fill="currentColor" />
+          <path d="m66 43 8-8m-8 8 8 8m11-16-8 8 8 8" stroke="url(#header-gold-gradient)" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
       </span>
-      <span className="brand-wordmark">
-        THECODEX<span>THRILL</span>
-      </span>
+      <div className="brand-text-block">
+        <span className="brand-wordmark">
+          The<span>Codex</span>Thrill<sup>™</sup>
+        </span>
+        <span className="brand-micro-tagline">Build · Innovate · Deploy · Scale</span>
+      </div>
     </Link>
   );
 }
@@ -38,7 +55,7 @@ export function SiteHeader() {
           ))}
         </nav>
         <div className="header-actions">
-          <Link className="header-login" href="/login">Login</Link>
+          <HeaderAuthAction />
           <ThemeToggle />
           <Button asChild className="header-cta" size="small">
             <Link href="/contact">
@@ -55,7 +72,7 @@ export function SiteHeader() {
                   {item.label}
                 </Link>
               ))}
-              <Link className="mobile-login-link" href="/login">Login</Link>
+              <HeaderAuthAction mobile />
               <Link href="/invite/accept">Accept an invitation</Link>
               <Link href="/contact">Get started</Link>
             </nav>

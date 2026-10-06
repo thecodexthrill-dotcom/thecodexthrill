@@ -99,3 +99,93 @@ export const articles = [
     ],
   },
 ] as const;
+
+export type PortfolioProject = {
+  slug: string;
+  title: string;
+  category: string;
+  industry: string;
+  summary: string;
+  description: string;
+  client: string;
+  timeline: string;
+  technologies: string[];
+  deliverables: string[];
+  results: string[];
+  challenge?: string;
+  solution?: string;
+  coverImageUrl?: string | null;
+  featured?: boolean;
+};
+
+export const portfolioProjects: PortfolioProject[] = [
+  {
+    slug: "apex-capital-engine",
+    title: "Apex Capital Operations Engine",
+    category: "Enterprise Software",
+    industry: "Fintech & Investment Banking",
+    summary: "Multi-tenant portfolio management and real-time reconciliation engine with strict Row-Level Security, sub-50ms query latency, and automated audit logging.",
+    description: "Apex Capital required a unified, high-integrity platform to replace legacy batch processing across global desks. We architected a zero-trust multi-tenant system using Next.js App Router and PostgreSQL Row-Level Security on Supabase Cloud, enforcing mandatory AAL2 MFA for high-value portfolio actions.",
+    client: "Apex Global Assets",
+    timeline: "16 weeks",
+    technologies: ["Next.js 16", "Supabase Cloud", "PostgreSQL RLS", "TypeScript", "Tailwind CSS"],
+    deliverables: ["Real-time transaction reconciliation pipeline", "Audited fund allocation ledger", "Multi-factor tenant access gateway", "Automated compliance export reports"],
+    results: [
+      "Sub-50ms reconciliation queries across 1.2M daily transactions",
+      "100% compliance audit pass with immutable event logs",
+      "Zero cross-tenant data leakage incidents",
+    ],
+  },
+  {
+    slug: "omnistream-ai-hub",
+    title: "OmniStream Autonomous Support Hub",
+    category: "AI Solutions",
+    industry: "SaaS & Developer Infrastructure",
+    summary: "Human-in-the-loop multi-agent triage system that classifies, routes, and drafts responses for complex technical incidents with verifiable source citations.",
+    description: "Designed for a high-growth developer platform, OmniStream couples domain-specific AI models with rigorous human review gates. Customer tickets are categorized with confidence scores, relevant codebase documents are embedded dynamically, and staff can review or adjust suggested resolutions with one click.",
+    client: "OmniStream Systems",
+    timeline: "12 weeks",
+    technologies: ["Next.js", "Python FastMCP", "Vector Embeddings", "Supabase", "TypeScript"],
+    deliverables: ["Context-aware incident classifier", "Human review escalation interface", "Streaming response generator with source links", "Drift and hallucination monitoring"],
+    results: [
+      "92% automated triage accuracy on unstructured technical issues",
+      "Average incident response time reduced from 4 hours to 18 minutes",
+      "Full citation traceability for every AI-generated suggestion",
+    ],
+  },
+  {
+    slug: "strata-cloud-deploy",
+    title: "Strata Progressive Deployment Orchestrator",
+    category: "Cloud & DevOps",
+    industry: "Enterprise Cloud Platforms",
+    summary: "Zero-downtime canary deployment orchestrator featuring automated health evaluations, metric threshold tracking, and instant rollback triggers.",
+    description: "Strata provides development teams with confidence during daily production deployments. We engineered a robust web interface and background telemetry collector that tracks release health in real time, pausing or rolling back releases whenever anomaly thresholds are breached.",
+    client: "Strata Cloud Networks",
+    timeline: "14 weeks",
+    technologies: ["Next.js", "Docker", "Prometheus", "PostgreSQL", "Tailwind CSS"],
+    deliverables: ["Progressive canary deployment dashboard", "Automated anomaly detection hooks", "Multi-region rollback automation", "SOC-2 Type II audit trail integration"],
+    results: [
+      "Zero downtime across 450+ weekly production releases",
+      "Mean time to recovery (MTTR) dropped to under 12 seconds",
+      "Consolidated multi-region deployment visibility for 80+ engineers",
+    ],
+  },
+  {
+    slug: "pulse-clinical-field",
+    title: "Pulse Clinical Field Companion",
+    category: "Mobile & Web Products",
+    industry: "Healthcare & Life Sciences",
+    summary: "Offline-first clinical tracking application enabling medical teams to record critical patient encounters in connectivity-constrained field environments.",
+    description: "Built for medical personnel operating in remote and bandwidth-constrained settings, Pulse uses local cryptographic stores, background service workers, and structured reconciliation algorithms to ensure no patient documentation is lost, synchronizing seamlessly upon connection restoration.",
+    client: "Pulse Health Initiative",
+    timeline: "20 weeks",
+    technologies: ["PWA Next.js", "IndexedDB", "PostgreSQL", "Web Cryptography API", "Tailwind CSS"],
+    deliverables: ["PWA with zero-data-loss offline storage", "Cryptographic conflict reconciliation worker", "HIPAA-compliant encrypted local cache", "Field-tested touch-optimized interface"],
+    results: [
+      "100% data preservation across 35,000+ remote patient encounters",
+      "Sub-100ms response time on ruggedized low-power field tablets",
+      "Instant background synchronization when cellular data resumes",
+    ],
+  },
+];
+

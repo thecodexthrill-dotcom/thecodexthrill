@@ -5,6 +5,7 @@ import { notFound } from "next/navigation";
 
 import { PageIntro } from "@/components/site/page-intro";
 import { articles } from "@/lib/public-content";
+import { getPublishedArticleBySlug } from "@/lib/cms-public";
 import { getPageMetadata } from "@/lib/seo";
 
 type Props = { params: Promise<{ slug: string }> };
@@ -15,7 +16,7 @@ export function generateStaticParams() {
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { slug } = await params;
-  const article = articles.find((item) => item.slug === slug);
+  const article = await getPublishedArticleBySlug(slug);
   if (!article) {
     return { title: "Not found", robots: { index: false, follow: false } };
   }
@@ -24,7 +25,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
 export default async function ArticlePage({ params }: Props) {
   const { slug } = await params;
-  const article = articles.find((item) => item.slug === slug);
+  const article = await getPublishedArticleBySlug(slug);
   if (!article) notFound();
 
   return (

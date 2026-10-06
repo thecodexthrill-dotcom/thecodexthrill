@@ -72,7 +72,7 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html data-scroll-behavior="smooth" lang="en" suppressHydrationWarning>
-      <body>
+      <head>
         {structuredData.map((entry) => (
           <script
             key={entry["@type"]}
@@ -82,6 +82,8 @@ export default function RootLayout({
             }}
           />
         ))}
+      </head>
+      <body>
         <ThemeProvider attribute="class" defaultTheme="dark" enableSystem>
           <WorkspaceDemoProvider>
             <SiteFrame>{children}</SiteFrame>

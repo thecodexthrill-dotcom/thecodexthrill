@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { PortfolioShowcase } from "@/components/site/portfolio-showcase";
-
 import { PageIntro } from "@/components/site/page-intro";
+import { getPublishedCaseStudies } from "@/lib/cms-public";
 import { getPageMetadata } from "@/lib/seo";
 
 export const metadata: Metadata = getPageMetadata(
@@ -10,7 +10,9 @@ export const metadata: Metadata = getPageMetadata(
   "/portfolio",
 );
 
-export default function PortfolioPage() {
+export default async function PortfolioPage() {
+  const projects = await getPublishedCaseStudies();
+
   return (
     <>
       <PageIntro
@@ -19,7 +21,7 @@ export default function PortfolioPage() {
         title={<>Ideas, made <em>real.</em></>}
       />
       <section className="content-section container-shell">
-        <PortfolioShowcase />
+        <PortfolioShowcase initialProjects={projects} />
       </section>
     </>
   );

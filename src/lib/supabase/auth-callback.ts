@@ -17,3 +17,8 @@ export function parseAuthCallbackParams(searchParams: URLSearchParams) {
 
   return { code, tokenHash, otpType, next };
 }
+
+export function isInvitationCallback(params: ReturnType<typeof parseAuthCallbackParams>): boolean {
+  return params.next === "/invite/accept"
+    && (params.otpType === "invite" || Boolean(params.code));
+}

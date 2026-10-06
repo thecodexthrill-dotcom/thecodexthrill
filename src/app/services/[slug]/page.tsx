@@ -1,14 +1,34 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { ArrowLeft, ArrowRight, Check } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  BrainCircuit,
+  Check,
+  Cloud,
+  Code2,
+  Layers3,
+  Smartphone,
+  Workflow,
+} from "lucide-react";
 import { notFound } from "next/navigation";
 
 import { PageIntro } from "@/components/site/page-intro";
 import { Button } from "@/components/ui/button";
 import { services } from "@/lib/public-content";
+import { getPublishedServiceBySlug } from "@/lib/cms-public";
 import { getPageMetadata } from "@/lib/seo";
 
 type Props = { params: Promise<{ slug: string }> };
+
+const iconMap: Record<string, React.ComponentType<{ "aria-hidden"?: boolean | "true" | "false"; size?: number }>> = {
+  BrainCircuit,
+  Cloud,
+  Code2,
+  Layers3,
+  Smartphone,
+  Workflow,
+};
 
 export function generateStaticParams() {
   return services.map(({ slug }) => ({ slug }));
@@ -16,7 +36,7 @@ export function generateStaticParams() {
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { slug } = await params;
-  const service = services.find((item) => item.slug === slug);
+  const service = await getPublishedServiceBySlug(slug);
   if (!service) {
     return { title: "Not found", robots: { index: false, follow: false } };
   }
@@ -25,9 +45,18 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
 export default async function ServiceDetailPage({ params }: Props) {
   const { slug } = await params;
-  const service = services.find((item) => item.slug === slug);
+  const service = await getPublishedServiceBySlug(slug);
   if (!service) notFound();
-  const Icon = service.icon;
+
+  const Icon = (service.iconName && iconMap[service.iconName]) || Code2;
+  const features =
+    service.features && service.features.length > 0
+      ? service.features
+      : [
+          "Understand the workflow and desired outcome",
+          "Choose a clear first step and validate assumptions",
+          "Build with quality, access, and future change in mind",
+        ];
 
   return (
     <>
@@ -45,19 +74,33 @@ export default async function ServiceDetailPage({ params }: Props) {
           <div className="service-detail-copy">
             <p>{service.description}</p>
             <ul>
-              <li><Check aria-hidden="true" />Understand the workflow and desired outcome</li>
-              <li><Check aria-hidden="true" />Choose a clear first step and validate assumptions</li>
-              <li><Check aria-hidden="true" />Build with quality, access, and future change in mind</li>
+              {features.map((feature, idx) => (
+                <li key={idx}>
+                  <Check aria-hidden="true" />
+                  {feature}
+                </li>
+              ))}
             </ul>
           </div>
         </div>
       </section>
       <section className="section container-shell service-detail-bottom">
         <div className="service-detail-icon"><Icon aria-hidden="true" /></div>
-        <div><p className="eyebrow"><span />Explore the next step</p><h2>Bring us the challenge you’re working through.</h2></div>
-        <Button asChild><Link href="/contact">Start a conversation <ArrowRight size={16} /></Link></Button>
+        <div>
+          <p className="eyebrow"><span />Explore the next step</p>
+          <h2>Bring us the challenge you’re working through.</h2>
+        </div>
+        <Button asChild>
+          <Link href={service.ctaUrl || "/contact"}>
+            {service.ctaLabel || "Start a conversation"} <ArrowRight size={16} />
+          </Link>
+        </Button>
       </section>
-      <div className="container-shell back-link-row"><Link className="text-link" href="/services"><ArrowLeft size={15} /> All services</Link></div>
+      <div className="container-shell back-link-row">
+        <Link className="text-link" href="/services">
+          <ArrowLeft size={15} /> All services
+        </Link>
+      </div>
     </>
   );
 }

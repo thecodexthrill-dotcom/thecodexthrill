@@ -35,7 +35,7 @@ self.addEventListener("fetch", (event) => {
   }
 
   event.respondWith(
-    fetch(request, { cache: "no-store" }).catch(async () => {
+    fetch(request).catch(async () => {
       const cache = await caches.open(CACHE_NAME);
       const offlinePage = await cache.match(OFFLINE_URL);
       return offlinePage ?? Response.error();

@@ -5,19 +5,20 @@ import Link from "next/link";
 import { ArrowRight, Search } from "lucide-react";
 
 import { articles } from "@/lib/public-content";
+import type { PublicArticle } from "@/lib/cms-public";
 
-const categories = ["All", ...new Set(articles.map((article) => article.category))];
-
-export function ArticleIndex() {
+export function ArticleIndex({ initialArticles }: { initialArticles?: PublicArticle[] }) {
+  const allArticles = initialArticles && initialArticles.length > 0 ? initialArticles : articles;
+  const categories = ["All", ...new Set(allArticles.map((article) => article.category))];
   const [category, setCategory] = useState("All");
   const [query, setQuery] = useState("");
   const visible = useMemo(
-    () => articles.filter((article) => {
+    () => allArticles.filter((article) => {
       const matchesCategory = category === "All" || article.category === category;
       const matchesQuery = `${article.title} ${article.excerpt}`.toLowerCase().includes(query.toLowerCase());
       return matchesCategory && matchesQuery;
     }),
-    [category, query],
+    [allArticles, category, query],
   );
 
   return (

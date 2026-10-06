@@ -1,162 +1,134 @@
-import {
-  ArrowDownRight,
-  ArrowRight,
-  BrainCircuit,
-  Cloud,
-  Code2,
-  Layers3,
-  Smartphone,
-  Workflow,
-} from "lucide-react";
+import type { Metadata } from "next";
 import Link from "next/link";
-
+import { ArrowRight, ShieldCheck, Terminal, Cpu, ArrowUpRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { ServiceCard } from "@/components/site/service-card";
 
-export const metadata = { alternates: { canonical: "/" } };
+import { HeroEditorial } from "@/components/site/hero-editorial";
+import { CapabilitiesEditorial } from "@/components/site/capabilities-editorial";
+import { EngineeringProcess } from "@/components/site/engineering-process";
+import { IndustriesEditorial } from "@/components/site/industries-editorial";
+import { FeaturedWorkEditorial } from "@/components/site/featured-work-editorial";
+import { TechStackMatrix } from "@/components/site/tech-stack-matrix";
+import { EngineeringFaq } from "@/components/site/engineering-faq";
+import { ScrollReveal } from "@/components/ui/scroll-reveal";
+import { getPageMetadata } from "@/lib/seo";
+import {
+  getPublishedHeroSettings,
+  getPublishedHeroSlides,
+  getPublishedCapabilities,
+  getPublishedProcessSteps,
+  getPublishedIndustries,
+  getPublishedTechStack,
+  getPublishedFaqs,
+  getPublishedCaseStudies,
+} from "@/lib/cms-public";
 
-const capabilities = [
-  {
-    title: "Web applications",
-    description:
-      "Purpose-built digital products with considered interfaces and dependable engineering beneath them.",
-    icon: Code2,
-  },
-  {
-    title: "Mobile products",
-    description:
-      "Useful, coherent mobile experiences shaped around the people who rely on them.",
-    icon: Smartphone,
-  },
-  {
-    title: "AI solutions",
-    description:
-      "Practical intelligence integrated where it creates measurable value and earns user trust.",
-    icon: BrainCircuit,
-  },
-  {
-    title: "SaaS platforms",
-    description:
-      "Flexible product foundations designed to grow with customers, teams, and new ideas.",
-    icon: Layers3,
-  },
-  {
-    title: "Cloud & DevOps",
-    description:
-      "Clear paths from development to deployment, with operations in view from day one.",
-    icon: Cloud,
-  },
-  {
-    title: "Enterprise software",
-    description:
-      "Connected systems and workflows built around the realities of complex organizations.",
-    icon: Workflow,
-  },
-];
+export const metadata: Metadata = getPageMetadata(
+  "TheCodexThrill — Engineering Digital Products That Scale",
+  "TheCodexThrill architects and builds high-performance web applications, enterprise platforms, autonomous AI systems, and mission-critical cloud software.",
+  "/",
+);
 
-export default function HomePage() {
+export default async function HomePage() {
+  const [
+    heroSettings,
+    heroSlides,
+    capabilities,
+    processSteps,
+    industries,
+    techStack,
+    faqs,
+    caseStudies,
+  ] = await Promise.all([
+    getPublishedHeroSettings(),
+    getPublishedHeroSlides(),
+    getPublishedCapabilities(),
+    getPublishedProcessSteps(),
+    getPublishedIndustries(),
+    getPublishedTechStack(),
+    getPublishedFaqs(),
+    getPublishedCaseStudies(),
+  ]);
+
   return (
     <>
-      <section className="hero container-shell">
-        <div className="hero-grid">
-          <div className="hero-copy">
-            <p className="eyebrow"><span />Software solutions for a brighter tomorrow</p>
-            <h1>
-              Build. <em>Innovate.</em><br className="hero-line-break" /> Deploy. Scale.
-            </h1>
-            <p className="hero-description">
-              We build web, mobile, and AI solutions that help teams bring useful
-              ideas into the world with clarity and care.
-            </p>
-            <div className="hero-actions">
-              <Button asChild>
-                <Link href="/contact">
-                  Start your project <ArrowRight aria-hidden="true" size={16} />
-                </Link>
-              </Button>
-              <Button asChild variant="secondary">
-                <Link href="/portfolio">View our work <ArrowRight aria-hidden="true" size={16} /></Link>
-              </Button>
-            </div>
-            <p className="hero-note">Product thinking · Engineering · Delivery</p>
-          </div>
-          <div aria-hidden="true" className="hero-art">
-            <div className="hero-orbit">
-              <span className="orbit-ring" />
-              <span className="orbit-ring" />
-              <span className="orbit-ring" />
-              <span className="orbit-core">C</span>
-              <span className="orbit-node one"><Code2 /></span>
-              <span className="orbit-node two"><Cloud /></span>
-              <span className="orbit-node three"><Layers3 /></span>
-              <span className="orbit-node four"><BrainCircuit /></span>
-            </div>
-            <span className="art-caption">Ideas into engineered outcomes</span>
-          </div>
-        </div>
-      </section>
+      {/* 1. Hero Editorial Section with Multi-Image Slideshow & Verification Strip */}
+      <HeroEditorial settings={heroSettings} slides={heroSlides} />
 
-      <section aria-labelledby="capabilities-title" className="section section-muted">
+      {/* 2. Capabilities Section (Content > Containers) */}
+      <CapabilitiesEditorial capabilities={capabilities} />
+
+      {/* 3. Engineering Process (7-Stage Methodology) */}
+      <EngineeringProcess steps={processSteps} />
+
+      {/* 4. Strategic Industry Verticals */}
+      <IndustriesEditorial industries={industries} />
+
+      {/* 5. Production Case Study Spotlights */}
+      <FeaturedWorkEditorial projects={caseStudies} />
+
+      {/* 6. Comprehensive Technology Stack Matrix */}
+      <TechStackMatrix items={techStack} />
+
+      {/* 7. Engineering FAQs */}
+      <EngineeringFaq faqs={faqs} />
+
+      {/* 8. Conversion Section with Architectural Focus */}
+      <section className="section-final-conversion">
         <div className="container-shell">
-          <div className="section-heading">
-            <div>
-              <p className="eyebrow"><span />What we build</p>
-              <h2 id="capabilities-title">Technology with a reason to exist.</h2>
+          <ScrollReveal variant="fade-up">
+            <div className="conversion-card">
+            <div className="conversion-content">
+              <div className="conversion-badge">
+                <span className="badge-dot" />
+                <span>Next Release Window Opening</span>
+              </div>
+              <h2 className="conversion-title">
+                Let&apos;s Architect Your Next <em>Breakthrough Platform.</em>
+              </h2>
+              <p className="conversion-desc">
+                Whether you need a full greenfield product built from first schema, a legacy system modernized without downtime, or practical AI agents embedded into your workflows—we bring senior engineering firepower to your team.
+              </p>
+              <div className="conversion-actions">
+                <Button asChild size="default" className="conversion-primary-btn">
+                  <Link href="/contact">
+                    Start an Engineering Inquiry <ArrowRight aria-hidden="true" size={16} />
+                  </Link>
+                </Button>
+                <Button asChild variant="secondary" className="conversion-secondary-btn">
+                  <Link href="/portfolio">
+                    Review Architecture Case Studies <ArrowUpRight aria-hidden="true" size={16} />
+                  </Link>
+                </Button>
+              </div>
             </div>
-            <p>
-              From first concept to dependable delivery, we bring product
-              thinking and engineering together.
-            </p>
-          </div>
-          <div className="service-grid">
-            {capabilities.map((capability) => (
-              <ServiceCard key={capability.title} {...capability} />
-            ))}
-          </div>
-          <div className="section-link-row">
-            <Link className="text-link" href="/services">
-              See all capabilities <ArrowRight aria-hidden="true" size={16} />
-            </Link>
-          </div>
-        </div>
-      </section>
 
-      <section className="section container-shell">
-        <div className="statement">
-          <p className="eyebrow"><span />How we work</p>
-          <h2>
-            Good software starts with <span>understanding.</span> Great
-            software keeps earning its place.
-          </h2>
-        </div>
-        <div className="statement-detail">
-          <p>
-            We make complex ideas easier to move forward: align on the problem,
-            build with care, and keep improving what matters.
-          </p>
-          <Link className="text-link" href="/about">
-            Meet our approach <ArrowDownRight aria-hidden="true" size={16} />
-          </Link>
-        </div>
-      </section>
-
-      <section className="section section-muted">
-        <div className="container-shell contact-panel">
-          <div>
-            <p className="eyebrow"><span />Have a challenge in mind?</p>
-            <h2>Let’s make the next step count.</h2>
-            <p>
-              Tell us what you’re working toward. We’ll start with the problem,
-              then work out what to build.
-            </p>
+            <div className="conversion-aside">
+              <div className="conversion-audit-box">
+                <div className="audit-box-header">
+                  <Terminal aria-hidden="true" size={16} />
+                  <span>TheCodexThrill Guarantee</span>
+                </div>
+                <ul>
+                  <li>
+                    <ShieldCheck aria-hidden="true" size={15} />
+                    <span>Zero-Trust database security policies by default</span>
+                  </li>
+                  <li>
+                    <Cpu aria-hidden="true" size={15} />
+                    <span>Strict 100% TypeScript compilation and automated tests</span>
+                  </li>
+                  <li>
+                    <Terminal aria-hidden="true" size={15} />
+                    <span>Full IP and source code repository ownership transferred</span>
+                  </li>
+                </ul>
+              </div>
+            </div>
           </div>
-          <Button asChild>
-            <Link href="/contact">
-              Get in touch <ArrowRight aria-hidden="true" size={16} />
-            </Link>
-          </Button>
-        </div>
-      </section>
+        </ScrollReveal>
+      </div>
+    </section>
     </>
   );
 }
