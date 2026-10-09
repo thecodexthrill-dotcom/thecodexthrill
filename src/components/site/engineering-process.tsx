@@ -62,6 +62,7 @@ export function EngineeringProcess({
                   <div className="process-step-card">
                     <div className="step-card-top">
                       <div className="step-badge-wrap">
+                        <span className="step-num-mobile">{stage.stepNumber}</span>
                         <span className="step-phase-badge">{stage.phaseName}</span>
                         <span className="step-duration">{stage.duration}</span>
                       </div>

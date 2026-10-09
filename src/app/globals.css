@@ -51,11 +51,17 @@
 
 * { box-sizing: border-box; }
 
-html { scroll-behavior: smooth; }
+html {
+  scroll-behavior: smooth;
+  overflow-x: clip;
+  max-width: 100vw;
+}
 
 body {
   min-height: 100vh;
   margin: 0;
+  overflow-x: clip;
+  max-width: 100vw;
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
@@ -2528,5 +2534,406 @@ body { background: var(--background); }
     transform: none !important;
     animation: none !important;
     transition: none !important;
+  }
+}
+
+/* ============================================================================
+   Mobile-First Luxury UI Refinements (<= 768px)
+   ============================================================================ */
+@media (max-width: 768px) {
+  /* Prevent horizontal wobble and entrance jitter */
+  html, body {
+    overflow-x: clip !important;
+    max-width: 100vw !important;
+  }
+
+  /* Header & Mobile Menu Polish */
+  .site-header-inner {
+    padding-inline: 16px;
+    height: 64px;
+    min-height: 64px;
+  }
+
+  .desktop-nav,
+  .header-cta {
+    display: none !important;
+  }
+
+  .mobile-menu {
+    display: block;
+    position: relative;
+  }
+
+  .mobile-menu summary {
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    border-radius: 10px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    color: var(--foreground);
+    cursor: pointer;
+    list-style: none;
+    transition: border-color 150ms ease, background 150ms ease;
+  }
+
+  .mobile-menu summary:hover,
+  .mobile-menu[open] summary {
+    border-color: var(--gold);
+    color: var(--gold-ink);
+  }
+
+  .mobile-menu summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .mobile-nav {
+    position: fixed;
+    top: 68px;
+    left: 12px;
+    right: 12px;
+    max-height: calc(100vh - 84px);
+    overflow-y: auto;
+    display: grid;
+    gap: 6px;
+    padding: 16px;
+    border-radius: 18px;
+    border: 1px solid var(--line-strong);
+    background: color-mix(in srgb, var(--surface-raised) 92%, #000 8%);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.45), 0 0 0 1px color-mix(in srgb, var(--gold) 15%, transparent);
+    z-index: 100;
+  }
+
+  .mobile-nav a,
+  .mobile-nav .header-login {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 48px;
+    padding: 12px 16px;
+    border-radius: 12px;
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--foreground);
+    border: 1px solid transparent;
+    transition: background 150ms ease, border-color 150ms ease;
+  }
+
+  .mobile-nav a:hover,
+  .mobile-nav a:active {
+    background: color-mix(in srgb, var(--surface) 80%, var(--gold-soft) 20%);
+    border-color: color-mix(in srgb, var(--gold) 35%, transparent);
+    color: var(--gold-ink);
+  }
+
+  /* Slide-Out Drawer Support for MobileNav component */
+  .mobile-menu-wrapper {
+    display: block;
+  }
+
+  .mobile-menu-btn {
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    border-radius: 10px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    color: var(--foreground);
+    cursor: pointer;
+    transition: all 160ms ease;
+  }
+
+  .mobile-menu-btn:hover {
+    border-color: var(--gold);
+    color: var(--gold-ink);
+  }
+
+  .mobile-nav-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.65);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    z-index: 998;
+  }
+
+  .mobile-nav-drawer {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(84vw, 360px);
+    background: var(--surface-raised);
+    border-left: 1px solid var(--line);
+    z-index: 999;
+    box-shadow: -16px 0 48px rgba(0, 0, 0, 0.4);
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    transition: transform 280ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .mobile-nav-drawer.drawer-closed {
+    transform: translate3d(100%, 0, 0);
+    pointer-events: none;
+  }
+
+  .mobile-nav-drawer.drawer-open {
+    transform: translate3d(0, 0, 0);
+  }
+
+  .mobile-nav-inner {
+    padding: 24px 20px 36px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .mobile-nav-eyebrow {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--gold-ink);
+    margin-bottom: 4px;
+  }
+
+  .mobile-nav-links {
+    display: grid;
+    gap: 4px;
+  }
+
+  .mobile-nav-link {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 48px;
+    padding: 12px 14px;
+    border-radius: 12px;
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--foreground);
+    transition: background 150ms ease, color 150ms ease;
+  }
+
+  .mobile-nav-link:hover,
+  .mobile-nav-link.active {
+    background: color-mix(in srgb, var(--surface) 75%, var(--gold-soft) 25%);
+    color: var(--gold-ink);
+  }
+
+  .mobile-nav-link.subtle {
+    color: var(--muted);
+    font-size: 14px;
+  }
+
+  .mobile-nav-active-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--gold);
+  }
+
+  .mobile-nav-divider {
+    height: 1px;
+    background: var(--line);
+    margin-block: 8px;
+  }
+
+  .mobile-nav-actions {
+    display: grid;
+    gap: 10px;
+  }
+
+  .mobile-nav-cta-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 48px;
+    padding: 12px 20px;
+    border-radius: 12px;
+    background: linear-gradient(135deg, #f2c777 0%, #c9964b 100%);
+    color: #0b0c0c;
+    font-weight: 700;
+    font-size: 14px;
+    text-decoration: none;
+    box-shadow: 0 4px 16px color-mix(in srgb, var(--gold) 35%, transparent);
+  }
+
+  /* Editorial Hero Refinement */
+  .hero-editorial {
+    padding-top: 88px;
+    padding-bottom: 48px;
+  }
+
+  .hero-editorial-title {
+    font-size: clamp(1.85rem, 7.5vw, 2.5rem) !important;
+    line-height: 1.12 !important;
+    letter-spacing: -0.04em !important;
+    word-break: break-word;
+    hyphens: auto;
+  }
+
+  .hero-editorial-sub {
+    font-size: 0.9375rem !important;
+    line-height: 1.6 !important;
+    margin-top: 14px !important;
+  }
+
+  .hero-editorial-actions {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 12px !important;
+    margin-top: 24px !important;
+  }
+
+  .hero-editorial-actions a,
+  .hero-editorial-actions button {
+    width: 100% !important;
+    min-height: 48px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+  }
+
+  .hero-carousel-container {
+    aspect-ratio: 16 / 10 !important;
+    margin-top: 28px !important;
+    border-radius: 14px !important;
+  }
+
+  .hero-slide-caption {
+    left: 12px !important;
+    bottom: 56px !important;
+    right: 12px !important;
+    max-width: none !important;
+    font-size: 12px !important;
+    padding: 8px 12px !important;
+  }
+
+  .hero-carousel-controls {
+    bottom: 12px !important;
+    right: 12px !important;
+    padding: 4px 8px !important;
+  }
+
+  .carousel-control-btn {
+    width: 32px !important;
+    height: 32px !important;
+  }
+
+  /* Process Step Badges */
+  .step-num-mobile {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--gold-ink);
+    border: 1px solid color-mix(in srgb, var(--gold) 40%, transparent);
+    background: color-mix(in srgb, var(--surface) 90%, var(--gold) 10%);
+    border-radius: 6px;
+    padding: 2px 8px;
+    letter-spacing: 0.05em;
+  }
+
+  /* Featured Work Index Badges */
+  .featured-index-mobile {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--gold-ink);
+    border: 1px solid color-mix(in srgb, var(--gold) 40%, transparent);
+    background: color-mix(in srgb, var(--surface) 90%, var(--gold) 10%);
+    border-radius: 6px;
+    padding: 2px 8px;
+    margin-right: 6px;
+  }
+
+  /* Pricing Grid Single Column */
+  .pricing-grid {
+    grid-template-columns: 1fr !important;
+    gap: 20px !important;
+  }
+
+  .pricing-tier-card {
+    padding: 24px 20px !important;
+  }
+
+  .pricing-cta-btn {
+    min-height: 48px !important;
+  }
+
+  /* Articles Grid Single Column */
+  .article-grid {
+    grid-template-columns: 1fr !important;
+    gap: 20px !important;
+  }
+
+  .article-controls {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 14px !important;
+  }
+
+  .article-search-input {
+    width: 100% !important;
+    font-size: 16px !important; /* Prevents iOS auto-zoom */
+  }
+
+  /* Portfolio Grid Single Column */
+  .public-project-grid {
+    grid-template-columns: 1fr !important;
+    gap: 24px !important;
+  }
+
+  .case-studies-grid {
+    grid-template-columns: 1fr !important;
+    gap: 24px !important;
+  }
+
+  /* Ensure inputs never trigger iOS zoom */
+  input, textarea, select {
+    font-size: 16px !important;
+  }
+
+  /* Ensure entrance animations do not introduce horizontal scroll */
+  .reveal-fade-slide-left,
+  .reveal-fade-slide-right {
+    transform: translate3d(0, 16px, 0) !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .hero-editorial-title {
+    font-size: clamp(1.75rem, 8vw, 2.15rem) !important;
+  }
+
+  .stats-grid,
+  .proof-stats-grid {
+    grid-template-columns: 1fr 1fr !important;
+    gap: 12px !important;
+  }
+
+  .proof-stat-item {
+    padding: 16px 12px !important;
+  }
+}
+
+@media (max-width: 360px) {
+  .stats-grid,
+  .proof-stats-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .hero-editorial-title {
+    font-size: 1.65rem !important;
   }
 }

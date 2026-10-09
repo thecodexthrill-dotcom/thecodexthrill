@@ -50,6 +50,7 @@ export function FeaturedWorkEditorial({
 
                 <div className="featured-work-content">
                   <div className="featured-work-tags">
+                    <span className="featured-index-mobile">0{idx + 1}</span>
                     <span className="featured-category">{proj.category}</span>
                     <span className="tag-dot">·</span>
                     <span className="featured-industry">{proj.industry}</span>

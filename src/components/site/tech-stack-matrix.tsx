@@ -1,10 +1,10 @@
-import { Shield, Database, Smartphone, Sparkles } from "lucide-react";
+import { Shield, Database, Smartphone, Sparkles, type LucideProps } from "lucide-react";
 import type { PublicTechItem } from "@/lib/cms-public";
 import { ScrollReveal } from "@/components/ui/scroll-reveal";
 
 export type TechGroup = {
   category: string;
-  icon: React.ComponentType<any>;
+  icon: React.ComponentType<LucideProps>;
   technologies: { name: string; role: string }[];
 };
 
@@ -66,7 +66,7 @@ export const defaultTechMatrix: TechGroup[] = [
   },
 ];
 
-function LayoutGridIcon(props: React.SVGProps<SVGSVGElement>) {
+function LayoutGridIcon(props: LucideProps) {
   return (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
       <rect width="7" height="7" x="3" y="3" rx="1" />
@@ -77,7 +77,7 @@ function LayoutGridIcon(props: React.SVGProps<SVGSVGElement>) {
   );
 }
 
-const categoryIconMap: Record<string, React.ComponentType<any>> = {
+const categoryIconMap: Record<string, React.ComponentType<LucideProps>> = {
   "Frontend & User Interface": LayoutGridIcon,
   "Backend, Database & Storage": Database,
   "Applied AI, Vector & Agents": Sparkles,
