@@ -561,10 +561,10 @@ export async function WorkspaceContent({
       supabase.from("organizations").select("status, created_at, name"),
       supabase.rpc("list_platform_users"),
       supabase.rpc("list_platform_invitations"),
-      supabase.from("platform_operations_projects").select("status, progress_pct, created_at, name"),
-      supabase.from("platform_operations_tasks").select("status, priority, created_at"),
-      supabase.from("platform_operations_invoices").select("amount_cents, status, currency, due_date, paid_at, created_at"),
-      supabase.from("platform_operations_support_tickets").select("status, priority, category, created_at"),
+      supabase.from("tenant_projects").select("status, progress_pct, created_at, name"),
+      supabase.from("tenant_tasks").select("status, priority, created_at"),
+      supabase.from("tenant_invoices").select("amount_cents, status, currency, due_date, paid_at, created_at"),
+      supabase.from("support_tickets").select("status, priority, category, created_at"),
     ]);
 
     const leads = (leadsResult.data ?? []) as AnalyticsData["leads"];

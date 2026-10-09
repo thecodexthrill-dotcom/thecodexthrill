@@ -2937,3 +2937,29 @@ body { background: var(--background); }
     font-size: 1.65rem !important;
   }
 }
+
+/* Printable Invoice & Statement Export */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .invoice-printable-card,
+  .invoice-printable-card * {
+    visibility: visible;
+  }
+  .invoice-printable-card {
+    position: fixed !important;
+    inset: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    border: none !important;
+    box-shadow: none !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    margin: 0 !important;
+    padding: 24px !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+}
