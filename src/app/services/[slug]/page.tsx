@@ -17,7 +17,11 @@ import { PageIntro } from "@/components/site/page-intro";
 import { Button } from "@/components/ui/button";
 import { services } from "@/lib/public-content";
 import { getPublishedServiceBySlug } from "@/lib/cms-public";
-import { getPageMetadata } from "@/lib/seo";
+import {
+  getPageMetadata,
+  getServiceStructuredData,
+  getBreadcrumbStructuredData,
+} from "@/lib/seo";
 
 type Props = { params: Promise<{ slug: string }> };
 
@@ -58,8 +62,25 @@ export default async function ServiceDetailPage({ params }: Props) {
           "Build with quality, access, and future change in mind",
         ];
 
+  const breadcrumbSchema = getBreadcrumbStructuredData([
+    { name: "Home", path: "/" },
+    { name: "Services", path: "/services" },
+    { name: service.title, path: `/services/${service.slug}` },
+  ]);
+  const serviceSchema = getServiceStructuredData({
+    title: service.title,
+    description: service.description,
+    path: `/services/${service.slug}`,
+  });
+
   return (
     <>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify([breadcrumbSchema, serviceSchema]).replace(/</g, "\\u003c"),
+        }}
+      />
       <PageIntro
         eyebrow="Our capabilities"
         title={<>{service.title} <em>with purpose.</em></>}

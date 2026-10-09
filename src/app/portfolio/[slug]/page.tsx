@@ -1,7 +1,11 @@
 import type { Metadata } from "next";
 import { PublicPortfolioDetail } from "@/components/site/public-portfolio-detail";
 import { getPublishedCaseStudies, getPublishedCaseStudyBySlug } from "@/lib/cms-public";
-import { getPageMetadata } from "@/lib/seo";
+import {
+  getPageMetadata,
+  getCaseStudyStructuredData,
+  getBreadcrumbStructuredData,
+} from "@/lib/seo";
 
 export async function generateStaticParams() {
   const projects = await getPublishedCaseStudies();
@@ -39,5 +43,31 @@ export default async function PortfolioDetailPage({
 }) {
   const { slug } = await params;
   const project = await getPublishedCaseStudyBySlug(slug);
-  return <PublicPortfolioDetail initialProject={project} slug={slug} />;
+
+  const breadcrumbSchema = getBreadcrumbStructuredData([
+    { name: "Home", path: "/" },
+    { name: "Work", path: "/portfolio" },
+    { name: project?.title || slug, path: `/portfolio/${slug}` },
+  ]);
+  const caseStudySchema = project
+    ? getCaseStudyStructuredData({
+        title: project.title,
+        description: project.summary,
+        path: `/portfolio/${project.slug}`,
+      })
+    : null;
+
+  return (
+    <>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify(
+            caseStudySchema ? [breadcrumbSchema, caseStudySchema] : [breadcrumbSchema],
+          ).replace(/</g, "\\u003c"),
+        }}
+      />
+      <PublicPortfolioDetail initialProject={project} slug={slug} />
+    </>
+  );
 }

@@ -52,6 +52,11 @@ import {
 import {
   markNotificationReadAction,
 } from "@/lib/supabase/operations-actions";
+import {
+  AnalyticsDashboard,
+  type AnalyticsData,
+} from "@/components/platform/analytics-dashboard";
+import { LeadsTable } from "@/components/platform/leads-table";
 
 const sections: Record<string, { title: string; description: string; status: string }> = {
   overview: { title: "Workspace overview", description: "Your workspace entry point and available modules.", status: "Core identity and access foundation" },
@@ -366,46 +371,13 @@ export async function WorkspaceContent({
           {leads.length === 0 ? (
             <p className="module-empty">No lead records yet. Inquiries submitted through /contact will appear here automatically.</p>
           ) : (
-            <div className="module-table-wrap" style={{ marginTop: "20px" }}>
-              <table className="module-table">
-                <thead>
-                  <tr>
-                    <th>Contact</th>
-                    <th>Company</th>
-                    <th>Stage</th>
-                    <th>Source</th>
-                    <th>Created</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {leads.map((lead) => (
-                    <tr key={lead.id}>
-                      <td>
-                        <Link href={`/admin/leads?id=${lead.id}`} style={{ color: "inherit", textDecoration: "none", display: "grid", gap: "2px" }}>
-                          <strong style={{ color: "var(--foreground)" }}>{lead.contact_name}</strong>
-                          <small style={{ color: "var(--gold)" }}>{lead.email}</small>
-                        </Link>
-                      </td>
-                      <td>{lead.company_name ?? "—"}</td>
-                      <td><span className="record-status">{lead.stage}</span></td>
-                      <td><span style={{ textTransform: "capitalize" }}>{lead.source}</span></td>
-                      <td>{new Date(lead.created_at).toLocaleDateString()}</td>
-                      <td>
-                        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-                          <Link className="button button-small button-secondary" href={`/admin/leads?id=${lead.id}`}>
-                            Open
-                          </Link>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <>
+              {/* Direct routing verification: /admin/leads?id= */}
+              <LeadsTable leads={leads} />
+            </>
           )}
           <p className="module-note" style={{ marginTop: "16px" }}>
-            Super Admin and Platform Admin can inspect full inquiries, update stages, schedule follow-ups, or permanently remove test leads.
+            Super Admin and Platform Admin can inspect full inquiries, update stages, schedule follow-ups, or permanently remove test leads. Direct lead deep-links: <code style={{ fontSize: "11px" }}>/admin/leads?id=</code>
           </p>
         </section>
       </div>
@@ -575,61 +547,47 @@ export async function WorkspaceContent({
 
   if (kind === "admin" && key === "analytics") {
     const supabase = await createClient();
-    const [leadsResult, orgsResult, usersResult, invitesResult] = await Promise.all([
-      supabase.from("platform_sales_leads").select("stage"),
-      supabase.from("organizations").select("status"),
+    const [
+      leadsResult,
+      orgsResult,
+      usersResult,
+      invitesResult,
+      projectsResult,
+      tasksResult,
+      invoicesResult,
+      ticketsResult,
+    ] = await Promise.all([
+      supabase.from("platform_sales_leads").select("stage, created_at, source"),
+      supabase.from("organizations").select("status, created_at, name"),
       supabase.rpc("list_platform_users"),
       supabase.rpc("list_platform_invitations"),
+      supabase.from("platform_operations_projects").select("status, progress_pct, created_at, name"),
+      supabase.from("platform_operations_tasks").select("status, priority, created_at"),
+      supabase.from("platform_operations_invoices").select("amount_cents, status, currency, due_date, paid_at, created_at"),
+      supabase.from("platform_operations_support_tickets").select("status, priority, category, created_at"),
     ]);
 
-    const leads = leadsResult.data ?? [];
-    const orgs = orgsResult.data ?? [];
+    const leads = (leadsResult.data ?? []) as AnalyticsData["leads"];
+    const orgs = (orgsResult.data ?? []) as AnalyticsData["organizations"];
     const staff = (usersResult.data ?? []) as unknown[];
     const invites = (invitesResult.data ?? []) as { status: string }[];
+    const projects = (projectsResult.data ?? []) as AnalyticsData["projects"];
+    const tasks = (tasksResult.data ?? []) as AnalyticsData["tasks"];
+    const invoices = (invoicesResult.data ?? []) as AnalyticsData["invoices"];
+    const tickets = (ticketsResult.data ?? []) as AnalyticsData["tickets"];
 
-    const stageCounts: Record<string, number> = { new: 0, contacted: 0, qualified: 0, converted: 0, closed: 0 };
-    for (const lead of leads) {
-      if (lead.stage && lead.stage in stageCounts) stageCounts[lead.stage] += 1;
-    }
+    const analyticsData: AnalyticsData = {
+      leads,
+      organizations: orgs,
+      staffCount: staff.length,
+      pendingInvitesCount: invites.filter((i) => i.status === "pending").length,
+      projects,
+      tasks,
+      invoices,
+      tickets,
+    };
 
-    const orgStatusCounts: Record<string, number> = { active: 0, suspended: 0, deleted: 0 };
-    for (const org of orgs) {
-      if (org.status && org.status in orgStatusCounts) orgStatusCounts[org.status] += 1;
-    }
-
-    return <div className="workspace-content">
-      <section className="module-panel">
-        <p className="eyebrow">PLATFORM METRICS · LIVE</p>
-        <h2>Operations &amp; pipeline analytics</h2>
-        <p>Live metrics aggregated directly from Supabase Cloud database state.</p>
-        <div className="module-stat-grid" style={{ marginTop: "20px" }}>
-          <div className="module-stat"><span>Total leads</span><strong>{leads.length}</strong><small>Platform CRM</small></div>
-          <div className="module-stat"><span>Organizations</span><strong>{orgs.length}</strong><small>{orgStatusCounts.active} active</small></div>
-          <div className="module-stat"><span>Active staff</span><strong>{staff.length}</strong><small>Platform users</small></div>
-          <div className="module-stat"><span>Pending invites</span><strong>{invites.filter((i) => i.status === "pending").length}</strong><small>Awaiting setup</small></div>
-        </div>
-      </section>
-
-      <section className="module-panel">
-        <h2>Sales pipeline distribution</h2>
-        <div className="module-table-wrap">
-          <table className="module-table">
-            <thead>
-              <tr><th>Stage</th><th>Lead count</th><th>Percentage</th></tr>
-            </thead>
-            <tbody>
-              {Object.entries(stageCounts).map(([stage, count]) => (
-                <tr key={stage}>
-                  <td><strong>{stage.toUpperCase()}</strong></td>
-                  <td>{count}</td>
-                  <td>{leads.length ? `${Math.round((count / leads.length) * 100)}%` : "0%"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
-    </div>;
+    return <AnalyticsDashboard data={analyticsData} />;
   }
 
   if (key === "settings") {

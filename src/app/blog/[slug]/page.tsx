@@ -6,7 +6,11 @@ import { notFound } from "next/navigation";
 import { PageIntro } from "@/components/site/page-intro";
 import { articles } from "@/lib/public-content";
 import { getPublishedArticleBySlug } from "@/lib/cms-public";
-import { getPageMetadata } from "@/lib/seo";
+import {
+  getPageMetadata,
+  getArticleStructuredData,
+  getBreadcrumbStructuredData,
+} from "@/lib/seo";
 
 type Props = { params: Promise<{ slug: string }> };
 
@@ -28,8 +32,25 @@ export default async function ArticlePage({ params }: Props) {
   const article = await getPublishedArticleBySlug(slug);
   if (!article) notFound();
 
+  const breadcrumbSchema = getBreadcrumbStructuredData([
+    { name: "Home", path: "/" },
+    { name: "Insights", path: "/blog" },
+    { name: article.title, path: `/blog/${article.slug}` },
+  ]);
+  const articleSchema = getArticleStructuredData({
+    title: article.title,
+    description: article.excerpt,
+    path: `/blog/${article.slug}`,
+  });
+
   return (
     <>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify([breadcrumbSchema, articleSchema]).replace(/</g, "\\u003c"),
+        }}
+      />
       <PageIntro eyebrow={article.category} title={<>{article.title}</>} description={`${article.excerpt} · ${article.readingTime}`} />
       <article className="section section-muted">
         <div className="article-body container-shell">
