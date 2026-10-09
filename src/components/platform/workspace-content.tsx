@@ -567,24 +567,26 @@ export async function WorkspaceContent({
       supabase.from("support_tickets").select("status, priority, category, created_at"),
     ]);
 
-    const leads = (leadsResult.data ?? []) as AnalyticsData["leads"];
-    const orgs = (orgsResult.data ?? []) as AnalyticsData["organizations"];
-    const staff = (usersResult.data ?? []) as unknown[];
-    const invites = (invitesResult.data ?? []) as { status: string }[];
-    const projects = (projectsResult.data ?? []) as AnalyticsData["projects"];
-    const tasks = (tasksResult.data ?? []) as AnalyticsData["tasks"];
-    const invoices = (invoicesResult.data ?? []) as AnalyticsData["invoices"];
-    const tickets = (ticketsResult.data ?? []) as AnalyticsData["tickets"];
+    const queryErrors: string[] = [];
+    if (leadsResult.error) queryErrors.push(`Leads: ${leadsResult.error.message}`);
+    if (orgsResult.error) queryErrors.push(`Organizations: ${orgsResult.error.message}`);
+    if (usersResult.error) queryErrors.push(`Staff Directory: ${usersResult.error.message}`);
+    if (invitesResult.error) queryErrors.push(`Invitations: ${invitesResult.error.message}`);
+    if (projectsResult.error) queryErrors.push(`Projects: ${projectsResult.error.message}`);
+    if (tasksResult.error) queryErrors.push(`Tasks: ${tasksResult.error.message}`);
+    if (invoicesResult.error) queryErrors.push(`Invoices & Billing: ${invoicesResult.error.message}`);
+    if (ticketsResult.error) queryErrors.push(`Support Tickets: ${ticketsResult.error.message}`);
 
     const analyticsData: AnalyticsData = {
-      leads,
-      organizations: orgs,
-      staffCount: staff.length,
-      pendingInvitesCount: invites.filter((i) => i.status === "pending").length,
-      projects,
-      tasks,
-      invoices,
-      tickets,
+      leads: leadsResult.error ? null : ((leadsResult.data ?? []) as NonNullable<AnalyticsData["leads"]>),
+      organizations: orgsResult.error ? null : ((orgsResult.data ?? []) as NonNullable<AnalyticsData["organizations"]>),
+      staffCount: usersResult.error ? null : ((usersResult.data ?? []) as unknown[]).length,
+      pendingInvitesCount: invitesResult.error ? null : ((invitesResult.data ?? []) as { status: string }[]).filter((i) => i.status === "pending").length,
+      projects: projectsResult.error ? null : ((projectsResult.data ?? []) as NonNullable<AnalyticsData["projects"]>),
+      tasks: tasksResult.error ? null : ((tasksResult.data ?? []) as NonNullable<AnalyticsData["tasks"]>),
+      invoices: invoicesResult.error ? null : ((invoicesResult.data ?? []) as NonNullable<AnalyticsData["invoices"]>),
+      tickets: ticketsResult.error ? null : ((ticketsResult.data ?? []) as NonNullable<AnalyticsData["tickets"]>),
+      queryErrors: queryErrors.length > 0 ? queryErrors : undefined,
     };
 
     return <AnalyticsDashboard data={analyticsData} />;
@@ -819,7 +821,7 @@ export async function WorkspaceContent({
         : supabase.from("organization_memberships").select("organization_id, organizations(id, name)").eq("status", "active"),
     ]);
 
-    const projects = (projectsResult.data ?? []) as ProjectRecord[];
+    const rawProjects = (projectsResult.data ?? []) as ProjectRecord[];
     const orgs = (
       kind === "admin"
         ? (orgsResult.data ?? [])
@@ -827,6 +829,11 @@ export async function WorkspaceContent({
             .map((m) => (Array.isArray(m.organizations) ? m.organizations[0] : m.organizations))
             .filter(Boolean)
     ) as { id: string; name: string }[];
+
+    const userOrgIds = new Set(orgs.map((o) => o.id));
+    const projects = kind === "admin"
+      ? rawProjects
+      : rawProjects.filter((p) => userOrgIds.has(p.organization_id));
 
     return (
       <ProjectManager
@@ -851,7 +858,7 @@ export async function WorkspaceContent({
         : supabase.from("organization_memberships").select("organization_id, organizations(id, name)").eq("status", "active"),
     ]);
 
-    const documents = (documentsResult.data ?? []) as DocumentRecord[];
+    const rawDocuments = (documentsResult.data ?? []) as DocumentRecord[];
     const orgs = (
       kind === "admin"
         ? (orgsResult.data ?? [])
@@ -859,6 +866,11 @@ export async function WorkspaceContent({
             .map((m) => (Array.isArray(m.organizations) ? m.organizations[0] : m.organizations))
             .filter(Boolean)
     ) as { id: string; name: string }[];
+
+    const userOrgIds = new Set(orgs.map((o) => o.id));
+    const documents = kind === "admin"
+      ? rawDocuments
+      : rawDocuments.filter((d) => userOrgIds.has(d.organization_id));
 
     return (
       <DocumentManager
@@ -882,7 +894,7 @@ export async function WorkspaceContent({
         : supabase.from("organization_memberships").select("organization_id, organizations(id, name)").eq("status", "active"),
     ]);
 
-    const invoices = (invoicesResult.data ?? []) as InvoiceRecord[];
+    const rawInvoices = (invoicesResult.data ?? []) as InvoiceRecord[];
     const orgs = (
       kind === "admin"
         ? (orgsResult.data ?? [])
@@ -891,12 +903,20 @@ export async function WorkspaceContent({
             .filter(Boolean)
     ) as { id: string; name: string }[];
 
+    // Tenant Isolation Defense-in-Depth:
+    // Only permit viewing invoices belonging to confirmed active user memberships
+    const userOrgIds = new Set(orgs.map((o) => o.id));
+    const invoices = kind === "admin"
+      ? rawInvoices
+      : rawInvoices.filter((inv) => userOrgIds.has(inv.organization_id));
+
     return (
       <BillingManager
         invoices={invoices}
         isStaff={kind === "admin"}
         userOrganizations={orgs}
         notice={notice}
+        queryError={invoicesResult.error?.message}
       />
     );
   }

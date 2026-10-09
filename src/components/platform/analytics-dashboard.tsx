@@ -55,14 +55,15 @@ export type AnalyticsTicket = {
 };
 
 export type AnalyticsData = {
-  leads: AnalyticsLead[];
-  organizations: AnalyticsOrg[];
-  staffCount: number;
-  pendingInvitesCount: number;
-  projects: AnalyticsProject[];
-  tasks: AnalyticsTask[];
-  invoices: AnalyticsInvoice[];
-  tickets: AnalyticsTicket[];
+  leads: AnalyticsLead[] | null;
+  organizations: AnalyticsOrg[] | null;
+  staffCount: number | null;
+  pendingInvitesCount: number | null;
+  projects: AnalyticsProject[] | null;
+  tasks: AnalyticsTask[] | null;
+  invoices: AnalyticsInvoice[] | null;
+  tickets: AnalyticsTicket[] | null;
+  queryErrors?: string[];
 };
 
 export function AnalyticsDashboard({ data }: { data: AnalyticsData }) {
@@ -76,7 +77,8 @@ export function AnalyticsDashboard({ data }: { data: AnalyticsData }) {
   }, [timeRange]);
 
   const filterByDate = useCallback(
-    <T extends { created_at: string }>(items: T[]): T[] => {
+    <T extends { created_at: string }>(items: T[] | null): T[] | null => {
+      if (!items) return null;
       if (!cutoffDate) return items;
       return items.filter((item) => new Date(item.created_at) >= cutoffDate);
     },
@@ -97,11 +99,13 @@ export function AnalyticsDashboard({ data }: { data: AnalyticsData }) {
     converted: 0,
     closed: 0,
   };
-  for (const l of filteredLeads) {
-    if (l.stage in stageCounts) stageCounts[l.stage] += 1;
+  if (filteredLeads) {
+    for (const l of filteredLeads) {
+      if (l.stage in stageCounts) stageCounts[l.stage] += 1;
+    }
   }
   const convertedLeads = stageCounts.converted;
-  const leadConversionRate = filteredLeads.length > 0
+  const leadConversionRate = filteredLeads && filteredLeads.length > 0
     ? Math.round((convertedLeads / filteredLeads.length) * 100)
     : 0;
 
@@ -114,11 +118,13 @@ export function AnalyticsDashboard({ data }: { data: AnalyticsData }) {
     on_hold: 0,
   };
   let totalProgress = 0;
-  for (const p of filteredProjects) {
-    if (p.status in projectStatusCounts) projectStatusCounts[p.status] += 1;
-    totalProgress += p.progress_pct || 0;
+  if (filteredProjects) {
+    for (const p of filteredProjects) {
+      if (p.status in projectStatusCounts) projectStatusCounts[p.status] += 1;
+      totalProgress += p.progress_pct || 0;
+    }
   }
-  const avgProgress = filteredProjects.length > 0
+  const avgProgress = filteredProjects && filteredProjects.length > 0
     ? Math.round(totalProgress / filteredProjects.length)
     : 0;
 
@@ -128,11 +134,13 @@ export function AnalyticsDashboard({ data }: { data: AnalyticsData }) {
     review: 0,
     done: 0,
   };
-  for (const t of filteredTasks) {
-    if (t.status in taskStatusCounts) taskStatusCounts[t.status] += 1;
+  if (filteredTasks) {
+    for (const t of filteredTasks) {
+      if (t.status in taskStatusCounts) taskStatusCounts[t.status] += 1;
+    }
   }
   const completedTasks = taskStatusCounts.done;
-  const taskCompletionRate = filteredTasks.length > 0
+  const taskCompletionRate = filteredTasks && filteredTasks.length > 0
     ? Math.round((completedTasks / filteredTasks.length) * 100)
     : 0;
 
@@ -150,19 +158,21 @@ export function AnalyticsDashboard({ data }: { data: AnalyticsData }) {
     cancelled: 0,
   };
 
-  for (const inv of filteredInvoices) {
-    if (inv.status in invoiceStatusCounts) invoiceStatusCounts[inv.status] += 1;
-    if (inv.status !== "cancelled" && inv.status !== "draft") {
-      totalBilledCents += inv.amount_cents;
-    }
-    if (inv.status === "paid") {
-      totalPaidCents += inv.amount_cents;
-    }
-    if (inv.status === "sent") {
-      totalOutstandingCents += inv.amount_cents;
-    }
-    if (inv.status === "overdue") {
-      totalOverdueCents += inv.amount_cents;
+  if (filteredInvoices) {
+    for (const inv of filteredInvoices) {
+      if (inv.status in invoiceStatusCounts) invoiceStatusCounts[inv.status] += 1;
+      if (inv.status !== "cancelled" && inv.status !== "draft") {
+        totalBilledCents += inv.amount_cents;
+      }
+      if (inv.status === "paid") {
+        totalPaidCents += inv.amount_cents;
+      }
+      if (inv.status === "sent") {
+        totalOutstandingCents += inv.amount_cents;
+      }
+      if (inv.status === "overdue") {
+        totalOverdueCents += inv.amount_cents;
+      }
     }
   }
 
@@ -183,19 +193,39 @@ export function AnalyticsDashboard({ data }: { data: AnalyticsData }) {
     closed: 0,
   };
   let urgentTickets = 0;
-  for (const tick of filteredTickets) {
-    if (tick.status in ticketStatusCounts) ticketStatusCounts[tick.status] += 1;
-    if (tick.priority === "urgent" && tick.status !== "resolved" && tick.status !== "closed") {
-      urgentTickets += 1;
+  if (filteredTickets) {
+    for (const tick of filteredTickets) {
+      if (tick.status in ticketStatusCounts) ticketStatusCounts[tick.status] += 1;
+      if (tick.priority === "urgent" && tick.status !== "resolved" && tick.status !== "closed") {
+        urgentTickets += 1;
+      }
     }
   }
   const resolvedTickets = ticketStatusCounts.resolved + ticketStatusCounts.closed;
-  const ticketResolutionRate = filteredTickets.length > 0
+  const ticketResolutionRate = filteredTickets && filteredTickets.length > 0
     ? Math.round((resolvedTickets / filteredTickets.length) * 100)
     : 100;
 
   return (
     <div className="workspace-content" style={{ display: "grid", gap: "28px" }}>
+      {/* Query Errors Alert Banner */}
+      {data.queryErrors && data.queryErrors.length > 0 && (
+        <section className="module-panel" style={{ border: "1px solid #ef4444", background: "color-mix(in srgb, #ef4444 8%, transparent)", padding: "16px 20px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", color: "#ef4444", fontWeight: 700, fontSize: "14px" }}>
+            <AlertCircle size={18} />
+            <span>Operational Query Alert ({data.queryErrors.length} dataset{data.queryErrors.length > 1 ? "s" : ""} unavailable)</span>
+          </div>
+          <p style={{ margin: "6px 0 0", fontSize: "13px", color: "var(--muted)" }}>
+            One or more queries could not be resolved from Supabase Cloud. Affected metrics display &ldquo;Unavailable&rdquo; rather than misleading zero metrics:
+          </p>
+          <ul style={{ margin: "8px 0 0 20px", fontSize: "12px", color: "#f87171", lineHeight: "1.6" }}>
+            {data.queryErrors.map((err, idx) => (
+              <li key={idx}>{err}</li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       {/* Header and Filter Controls */}
       <section className="module-panel">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "16px" }}>
@@ -267,32 +297,32 @@ export function AnalyticsDashboard({ data }: { data: AnalyticsData }) {
             <span style={{ display: "flex", alignItems: "center", gap: "6px" }}>
               <TrendingUp size={14} style={{ color: "var(--gold)" }} /> Total Sales Leads
             </span>
-            <strong>{filteredLeads.length}</strong>
-            <small>{leadConversionRate}% conversion to client</small>
+            <strong>{filteredLeads !== null ? filteredLeads.length : "—"}</strong>
+            <small>{filteredLeads !== null ? `${leadConversionRate}% conversion to client` : "Sync error"}</small>
           </div>
 
           <div className="module-stat">
             <span style={{ display: "flex", alignItems: "center", gap: "6px" }}>
               <FolderKanban size={14} style={{ color: "var(--gold)" }} /> Active Projects
             </span>
-            <strong>{projectStatusCounts.in_progress + projectStatusCounts.planning}</strong>
-            <small>{avgProgress}% average completion</small>
+            <strong>{filteredProjects !== null ? projectStatusCounts.in_progress + projectStatusCounts.planning : "—"}</strong>
+            <small>{filteredProjects !== null ? `${avgProgress}% average completion` : "Sync error"}</small>
           </div>
 
           <div className="module-stat">
             <span style={{ display: "flex", alignItems: "center", gap: "6px" }}>
               <CreditCard size={14} style={{ color: "var(--gold)" }} /> Collected Revenue
             </span>
-            <strong>{formatCurrency(totalPaidCents)}</strong>
-            <small>{formatCurrency(totalOutstandingCents + totalOverdueCents)} receivables</small>
+            <strong>{filteredInvoices !== null ? formatCurrency(totalPaidCents) : "—"}</strong>
+            <small>{filteredInvoices !== null ? `${formatCurrency(totalOutstandingCents + totalOverdueCents)} receivables` : "Sync error"}</small>
           </div>
 
           <div className="module-stat">
             <span style={{ display: "flex", alignItems: "center", gap: "6px" }}>
               <LifeBuoy size={14} style={{ color: "var(--gold)" }} /> Support Health
             </span>
-            <strong>{ticketResolutionRate}%</strong>
-            <small>{urgentTickets} urgent unresolved</small>
+            <strong>{filteredTickets !== null ? `${ticketResolutionRate}%` : "—"}</strong>
+            <small>{filteredTickets !== null ? `${urgentTickets} urgent unresolved` : "Sync error"}</small>
           </div>
         </div>
       </section>
@@ -308,7 +338,12 @@ export function AnalyticsDashboard({ data }: { data: AnalyticsData }) {
             </Link>
           </div>
 
-          {filteredLeads.length === 0 ? (
+          {filteredLeads === null ? (
+            <div style={{ padding: "24px", textAlign: "center", border: "1px dashed #ef4444", borderRadius: "12px", background: "color-mix(in srgb, #ef4444 5%, transparent)" }}>
+              <AlertCircle size={24} style={{ color: "#ef4444", margin: "0 auto 8px" }} />
+              <p style={{ margin: 0, fontSize: "14px", color: "#f87171" }}>Lead records unavailable from Supabase Cloud.</p>
+            </div>
+          ) : filteredLeads.length === 0 ? (
             <div style={{ padding: "24px", textAlign: "center", border: "1px dashed var(--line)", borderRadius: "12px" }}>
               <AlertCircle size={24} style={{ color: "var(--muted)", margin: "0 auto 8px" }} />
               <p style={{ margin: 0, fontSize: "14px", color: "var(--muted)" }}>No lead records found for this period.</p>
@@ -350,7 +385,12 @@ export function AnalyticsDashboard({ data }: { data: AnalyticsData }) {
             </Link>
           </div>
 
-          {filteredProjects.length === 0 ? (
+          {filteredProjects === null || filteredTasks === null ? (
+            <div style={{ padding: "24px", textAlign: "center", border: "1px dashed #ef4444", borderRadius: "12px", background: "color-mix(in srgb, #ef4444 5%, transparent)" }}>
+              <FolderKanban size={24} style={{ color: "#ef4444", margin: "0 auto 8px" }} />
+              <p style={{ margin: 0, fontSize: "14px", color: "#f87171" }}>Project delivery records unavailable from Supabase Cloud.</p>
+            </div>
+          ) : filteredProjects.length === 0 ? (
             <div style={{ padding: "24px", textAlign: "center", border: "1px dashed var(--line)", borderRadius: "12px" }}>
               <FolderKanban size={24} style={{ color: "var(--muted)", margin: "0 auto 8px" }} />
               <p style={{ margin: 0, fontSize: "14px", color: "var(--muted)" }}>No projects recorded yet.</p>
@@ -411,26 +451,33 @@ export function AnalyticsDashboard({ data }: { data: AnalyticsData }) {
             </Link>
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: "10px" }}>
-            <div style={{ padding: "12px", border: "1px solid var(--line)", borderRadius: "10px", background: "var(--surface)" }}>
-              <small style={{ color: "var(--subtle)", fontSize: "11px", textTransform: "uppercase" }}>Total Invoiced</small>
-              <p style={{ fontSize: "16px", fontWeight: 700, margin: "4px 0 0" }}>{formatCurrency(totalBilledCents)}</p>
+          {filteredInvoices === null ? (
+            <div style={{ padding: "24px", textAlign: "center", border: "1px dashed #ef4444", borderRadius: "12px", background: "color-mix(in srgb, #ef4444 5%, transparent)" }}>
+              <CreditCard size={24} style={{ color: "#ef4444", margin: "0 auto 8px" }} />
+              <p style={{ margin: 0, fontSize: "14px", color: "#f87171" }}>Commercial billing data unavailable from Supabase Cloud.</p>
             </div>
-            <div style={{ padding: "12px", border: "1px solid var(--line)", borderRadius: "10px", background: "var(--surface)" }}>
-              <small style={{ color: "var(--subtle)", fontSize: "11px", textTransform: "uppercase" }}>Paid Revenue</small>
-              <p style={{ fontSize: "16px", fontWeight: 700, margin: "4px 0 0", color: "#4ade80" }}>{formatCurrency(totalPaidCents)}</p>
+          ) : (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: "10px" }}>
+              <div style={{ padding: "12px", border: "1px solid var(--line)", borderRadius: "10px", background: "var(--surface)" }}>
+                <small style={{ color: "var(--subtle)", fontSize: "11px", textTransform: "uppercase" }}>Total Invoiced</small>
+                <p style={{ fontSize: "16px", fontWeight: 700, margin: "4px 0 0" }}>{formatCurrency(totalBilledCents)}</p>
+              </div>
+              <div style={{ padding: "12px", border: "1px solid var(--line)", borderRadius: "10px", background: "var(--surface)" }}>
+                <small style={{ color: "var(--subtle)", fontSize: "11px", textTransform: "uppercase" }}>Paid Revenue</small>
+                <p style={{ fontSize: "16px", fontWeight: 700, margin: "4px 0 0", color: "#4ade80" }}>{formatCurrency(totalPaidCents)}</p>
+              </div>
+              <div style={{ padding: "12px", border: "1px solid var(--line)", borderRadius: "10px", background: "var(--surface)" }}>
+                <small style={{ color: "var(--subtle)", fontSize: "11px", textTransform: "uppercase" }}>Pending (Sent)</small>
+                <p style={{ fontSize: "16px", fontWeight: 700, margin: "4px 0 0", color: "var(--gold)" }}>{formatCurrency(totalOutstandingCents)}</p>
+              </div>
+              <div style={{ padding: "12px", border: "1px solid var(--line)", borderRadius: "10px", background: "var(--surface)" }}>
+                <small style={{ color: "var(--subtle)", fontSize: "11px", textTransform: "uppercase" }}>Overdue</small>
+                <p style={{ fontSize: "16px", fontWeight: 700, margin: "4px 0 0", color: totalOverdueCents > 0 ? "#f87171" : "var(--muted)" }}>
+                  {formatCurrency(totalOverdueCents)}
+                </p>
+              </div>
             </div>
-            <div style={{ padding: "12px", border: "1px solid var(--line)", borderRadius: "10px", background: "var(--surface)" }}>
-              <small style={{ color: "var(--subtle)", fontSize: "11px", textTransform: "uppercase" }}>Pending (Sent)</small>
-              <p style={{ fontSize: "16px", fontWeight: 700, margin: "4px 0 0", color: "var(--gold)" }}>{formatCurrency(totalOutstandingCents)}</p>
-            </div>
-            <div style={{ padding: "12px", border: "1px solid var(--line)", borderRadius: "10px", background: "var(--surface)" }}>
-              <small style={{ color: "var(--subtle)", fontSize: "11px", textTransform: "uppercase" }}>Overdue</small>
-              <p style={{ fontSize: "16px", fontWeight: 700, margin: "4px 0 0", color: totalOverdueCents > 0 ? "#f87171" : "var(--muted)" }}>
-                {formatCurrency(totalOverdueCents)}
-              </p>
-            </div>
-          </div>
+          )}
         </section>
 
         {/* Support Ticket Resolution */}
@@ -442,24 +489,31 @@ export function AnalyticsDashboard({ data }: { data: AnalyticsData }) {
             </Link>
           </div>
 
-          <div style={{ display: "grid", gap: "14px" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", border: "1px solid var(--line)", borderRadius: "10px", background: "var(--surface)" }}>
-              <span style={{ fontSize: "13px" }}>Open Tickets in Queue:</span>
-              <strong style={{ fontSize: "14px", color: ticketStatusCounts.new > 0 ? "var(--gold)" : "var(--foreground)" }}>
-                {ticketStatusCounts.new + ticketStatusCounts.in_progress}
-              </strong>
+          {filteredTickets === null ? (
+            <div style={{ padding: "24px", textAlign: "center", border: "1px dashed #ef4444", borderRadius: "12px", background: "color-mix(in srgb, #ef4444 5%, transparent)" }}>
+              <LifeBuoy size={24} style={{ color: "#ef4444", margin: "0 auto 8px" }} />
+              <p style={{ margin: 0, fontSize: "14px", color: "#f87171" }}>Support ticket records unavailable from Supabase Cloud.</p>
             </div>
+          ) : (
+            <div style={{ display: "grid", gap: "14px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", border: "1px solid var(--line)", borderRadius: "10px", background: "var(--surface)" }}>
+                <span style={{ fontSize: "13px" }}>Open Tickets in Queue:</span>
+                <strong style={{ fontSize: "14px", color: ticketStatusCounts.new > 0 ? "var(--gold)" : "var(--foreground)" }}>
+                  {ticketStatusCounts.new + ticketStatusCounts.in_progress}
+                </strong>
+              </div>
 
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", border: "1px solid var(--line)", borderRadius: "10px", background: "var(--surface)" }}>
-              <span style={{ fontSize: "13px" }}>Waiting on Client:</span>
-              <strong style={{ fontSize: "14px" }}>{ticketStatusCounts.waiting_on_client}</strong>
-            </div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", border: "1px solid var(--line)", borderRadius: "10px", background: "var(--surface)" }}>
+                <span style={{ fontSize: "13px" }}>Waiting on Client:</span>
+                <strong style={{ fontSize: "14px" }}>{ticketStatusCounts.waiting_on_client}</strong>
+              </div>
 
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", border: "1px solid var(--line)", borderRadius: "10px", background: "var(--surface)" }}>
-              <span style={{ fontSize: "13px" }}>Resolved &amp; Closed:</span>
-              <strong style={{ fontSize: "14px", color: "#4ade80" }}>{resolvedTickets}</strong>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", border: "1px solid var(--line)", borderRadius: "10px", background: "var(--surface)" }}>
+                <span style={{ fontSize: "13px" }}>Resolved &amp; Closed:</span>
+                <strong style={{ fontSize: "14px", color: "#4ade80" }}>{resolvedTickets}</strong>
+              </div>
             </div>
-          </div>
+          )}
         </section>
       </div>
 

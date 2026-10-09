@@ -28,6 +28,7 @@ type BillingManagerProps = {
   isStaff: boolean;
   userOrganizations?: { id: string; name: string }[];
   notice?: string;
+  queryError?: string;
 };
 
 export function BillingManager({
@@ -35,6 +36,7 @@ export function BillingManager({
   isStaff,
   userOrganizations = [],
   notice,
+  queryError,
 }: BillingManagerProps) {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<InvoiceRecord | null>(null);
@@ -49,6 +51,12 @@ export function BillingManager({
 
   return (
     <div className="workspace-content" style={{ display: "grid", gap: "24px" }}>
+      {queryError && (
+        <p className="module-alert" role="alert">
+          <strong>Database Query Warning:</strong> Unable to retrieve full invoice records ({queryError}).
+        </p>
+      )}
+
       {notice && (
         <p className={notice === "invalid" || notice === "save" ? "module-alert" : "module-success"} role="status">
           {notice === "created" ? "Invoice generated successfully." : notice === "updated" ? "Invoice status updated." : notice === "deleted" ? "Invoice deleted." : notice}
@@ -295,185 +303,249 @@ export function BillingManager({
       )}
 
       {/* Printable Invoice Modal / Statement View */}
-      {selectedInvoice && (
-        <div
-          className="invoice-modal-backdrop"
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0, 0, 0, 0.75)",
-            backdropFilter: "blur(6px)",
-            zIndex: 1000,
-            display: "grid",
-            placeItems: "center",
-            padding: "20px",
-            overflowY: "auto",
-          }}
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setSelectedInvoice(null);
-          }}
-        >
-          <div
-            className="invoice-printable-card"
-            style={{
-              background: "var(--surface-raised)",
-              border: "1px solid var(--line-strong)",
-              borderRadius: "16px",
-              width: "min(100%, 720px)",
-              maxHeight: "90vh",
-              overflowY: "auto",
-              boxShadow: "0 24px 64px rgba(0,0,0,0.5)",
-              padding: "36px 32px",
-            }}
-          >
-            {/* Modal Controls */}
-            <div className="no-print" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "24px", borderBottom: "1px solid var(--line)", paddingBottom: "16px" }}>
-              <span style={{ fontSize: "12px", color: "var(--gold-ink)", fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase" }}>
-                Commercial Statement &middot; {selectedInvoice.invoice_number}
-              </span>
-              <div style={{ display: "flex", gap: "10px" }}>
-                <button
-                  type="button"
-                  onClick={() => window.print()}
-                  className="button button-gold button-small"
-                  style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
-                >
-                  <Printer size={13} /> Print / Save PDF
-                </button>
+      {selectedInvoice && (() => {
+        const isAuthorized = isStaff || userOrganizations.some((o) => o.id === selectedInvoice.organization_id);
+        if (!isAuthorized) {
+          return (
+            <div
+              className="invoice-modal-backdrop"
+              style={{
+                position: "fixed",
+                inset: 0,
+                background: "rgba(0, 0, 0, 0.75)",
+                backdropFilter: "blur(6px)",
+                zIndex: 1000,
+                display: "grid",
+                placeItems: "center",
+                padding: "20px",
+              }}
+              onClick={(e) => {
+                if (e.target === e.currentTarget) setSelectedInvoice(null);
+              }}
+            >
+              <div
+                className="invoice-printable-card"
+                style={{
+                  background: "var(--surface-raised)",
+                  border: "1px solid #ef4444",
+                  borderRadius: "16px",
+                  width: "min(100%, 520px)",
+                  padding: "36px 32px",
+                  textAlign: "center",
+                }}
+              >
+                <p className="module-alert" role="alert" style={{ marginBottom: "20px" }}>
+                  <strong>Access Denied:</strong> You are not authorized to view financial statements for this client organization.
+                </p>
                 <button
                   type="button"
                   onClick={() => setSelectedInvoice(null)}
-                  className="button button-secondary button-small"
-                  style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}
+                  className="button button-secondary"
                 >
-                  <X size={14} /> Close
+                  Close
                 </button>
               </div>
             </div>
+          );
+        }
 
-            {/* Invoice Document Header */}
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "20px" }}>
-              <div>
-                <h2 style={{ fontSize: "22px", fontWeight: 700, margin: 0, letterSpacing: "-.02em" }}>TheCodexThrill</h2>
-                <p style={{ margin: "4px 0 0", color: "var(--muted)", fontSize: "13px" }}>
-                  Engineering · AI Architectures · Cloud Systems
-                </p>
-                <p style={{ margin: "2px 0 0", color: "var(--subtle)", fontSize: "12px" }}>
-                  https://thecodexthrill.com &middot; billing@thecodexthrill.com
-                </p>
-              </div>
+        const itemsSubtotalCents = selectedInvoice.items && selectedInvoice.items.length > 0
+          ? selectedInvoice.items.reduce((sum, item) => sum + (item.amount_cents || 0), 0)
+          : selectedInvoice.amount_cents;
+        const isPaid = selectedInvoice.status === "paid";
+        const paidAmountCents = isPaid ? selectedInvoice.amount_cents : 0;
+        const balanceDueCents = isPaid ? 0 : selectedInvoice.amount_cents;
 
-              <div style={{ textAlign: "right" }}>
-                <h1 style={{ fontSize: "26px", fontWeight: 700, margin: 0, color: "var(--gold-ink)" }}>INVOICE</h1>
-                <p style={{ margin: "4px 0 0", fontWeight: 600, fontSize: "14px" }}>{selectedInvoice.invoice_number}</p>
-                <span
-                  style={{
-                    display: "inline-block",
-                    marginTop: "6px",
-                    padding: "3px 10px",
-                    borderRadius: "6px",
-                    fontSize: "11px",
-                    fontWeight: 700,
-                    textTransform: "uppercase",
-                    letterSpacing: ".08em",
-                    background: selectedInvoice.status === "paid" ? "color-mix(in srgb, #10b981 20%, transparent)" : selectedInvoice.status === "overdue" ? "color-mix(in srgb, #ef4444 20%, transparent)" : "color-mix(in srgb, var(--gold) 20%, transparent)",
-                    color: selectedInvoice.status === "paid" ? "#10b981" : selectedInvoice.status === "overdue" ? "#ef4444" : "var(--gold-ink)",
-                    border: `1px solid ${selectedInvoice.status === "paid" ? "#10b981" : selectedInvoice.status === "overdue" ? "#ef4444" : "var(--gold)"}`,
-                  }}
-                >
-                  Status: {selectedInvoice.status}
+        return (
+          <div
+            className="invoice-modal-backdrop"
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(0, 0, 0, 0.75)",
+              backdropFilter: "blur(6px)",
+              zIndex: 1000,
+              display: "grid",
+              placeItems: "center",
+              padding: "20px",
+              overflowY: "auto",
+            }}
+            onClick={(e) => {
+              if (e.target === e.currentTarget) setSelectedInvoice(null);
+            }}
+          >
+            <div
+              className="invoice-printable-card"
+              style={{
+                background: "var(--surface-raised)",
+                border: "1px solid var(--line-strong)",
+                borderRadius: "16px",
+                width: "min(100%, 720px)",
+                maxHeight: "90vh",
+                overflowY: "auto",
+                boxShadow: "0 24px 64px rgba(0,0,0,0.5)",
+                padding: "36px 32px",
+              }}
+            >
+              {/* Modal Controls */}
+              <div className="no-print" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "24px", borderBottom: "1px solid var(--line)", paddingBottom: "16px" }}>
+                <span style={{ fontSize: "12px", color: "var(--gold-ink)", fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase" }}>
+                  Commercial Statement &middot; {selectedInvoice.invoice_number}
                 </span>
-              </div>
-            </div>
-
-            {/* Bill To & Metadata */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px", margin: "28px 0", padding: "18px", border: "1px solid var(--line)", borderRadius: "12px", background: "var(--surface)" }}>
-              <div>
-                <small style={{ color: "var(--subtle)", fontSize: "11px", textTransform: "uppercase", letterSpacing: ".08em", display: "block" }}>Billed To</small>
-                <strong style={{ fontSize: "15px", display: "block", marginTop: "4px" }}>
-                  {userOrganizations.find((o) => o.id === selectedInvoice.organization_id)?.name || "Client Organization"}
-                </strong>
-                <p style={{ margin: "2px 0 0", color: "var(--muted)", fontSize: "12px" }}>
-                  Enterprise Client Account
-                </p>
-              </div>
-
-              <div style={{ textAlign: "right" }}>
-                <div style={{ fontSize: "13px", color: "var(--muted)" }}>
-                  <span>Issue Date: </span>
-                  <strong style={{ color: "var(--foreground)" }}>{new Date(selectedInvoice.created_at).toLocaleDateString()}</strong>
+                <div style={{ display: "flex", gap: "10px" }}>
+                  <button
+                    type="button"
+                    onClick={() => window.print()}
+                    className="button button-gold button-small"
+                    style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
+                  >
+                    <Printer size={13} /> Print / Save PDF
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedInvoice(null)}
+                    className="button button-secondary button-small"
+                    style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}
+                  >
+                    <X size={14} /> Close
+                  </button>
                 </div>
-                <div style={{ fontSize: "13px", color: "var(--muted)", marginTop: "4px" }}>
-                  <span>Due Date: </span>
-                  <strong style={{ color: "var(--foreground)" }}>{selectedInvoice.due_date || "Due on receipt"}</strong>
+              </div>
+
+              {/* Invoice Document Header */}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "20px" }}>
+                <div>
+                  <h2 style={{ fontSize: "22px", fontWeight: 700, margin: 0, letterSpacing: "-.02em" }}>TheCodexThrill</h2>
+                  <p style={{ margin: "4px 0 0", color: "var(--muted)", fontSize: "13px" }}>
+                    Engineering · AI Architectures · Cloud Systems
+                  </p>
+                  <p style={{ margin: "2px 0 0", color: "var(--subtle)", fontSize: "12px" }}>
+                    https://thecodexthrill.com &middot; billing@thecodexthrill.com
+                  </p>
                 </div>
-                {selectedInvoice.paid_at && (
-                  <div style={{ fontSize: "13px", color: "#10b981", marginTop: "4px" }}>
-                    <span>Settled On: </span>
-                    <strong>{new Date(selectedInvoice.paid_at).toLocaleDateString()}</strong>
+
+                <div style={{ textAlign: "right" }}>
+                  <h1 style={{ fontSize: "26px", fontWeight: 700, margin: 0, color: "var(--gold-ink)" }}>INVOICE</h1>
+                  <p style={{ margin: "4px 0 0", fontWeight: 600, fontSize: "14px" }}>{selectedInvoice.invoice_number}</p>
+                  <span
+                    style={{
+                      display: "inline-block",
+                      marginTop: "6px",
+                      padding: "3px 10px",
+                      borderRadius: "6px",
+                      fontSize: "11px",
+                      fontWeight: 700,
+                      textTransform: "uppercase",
+                      letterSpacing: ".08em",
+                      background: selectedInvoice.status === "paid" ? "color-mix(in srgb, #10b981 20%, transparent)" : selectedInvoice.status === "overdue" ? "color-mix(in srgb, #ef4444 20%, transparent)" : "color-mix(in srgb, var(--gold) 20%, transparent)",
+                      color: selectedInvoice.status === "paid" ? "#10b981" : selectedInvoice.status === "overdue" ? "#ef4444" : "var(--gold-ink)",
+                      border: `1px solid ${selectedInvoice.status === "paid" ? "#10b981" : selectedInvoice.status === "overdue" ? "#ef4444" : "var(--gold)"}`,
+                    }}
+                  >
+                    Status: {selectedInvoice.status}
+                  </span>
+                </div>
+              </div>
+
+              {/* Bill To & Metadata */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px", margin: "28px 0", padding: "18px", border: "1px solid var(--line)", borderRadius: "12px", background: "var(--surface)" }}>
+                <div>
+                  <small style={{ color: "var(--subtle)", fontSize: "11px", textTransform: "uppercase", letterSpacing: ".08em", display: "block" }}>Billed To</small>
+                  <strong style={{ fontSize: "15px", display: "block", marginTop: "4px" }}>
+                    {userOrganizations.find((o) => o.id === selectedInvoice.organization_id)?.name || "Client Organization"}
+                  </strong>
+                  <p style={{ margin: "2px 0 0", color: "var(--muted)", fontSize: "12px" }}>
+                    Enterprise Client Account
+                  </p>
+                </div>
+
+                <div style={{ textAlign: "right" }}>
+                  <div style={{ fontSize: "13px", color: "var(--muted)" }}>
+                    <span>Issue Date: </span>
+                    <strong style={{ color: "var(--foreground)" }}>{new Date(selectedInvoice.created_at).toLocaleDateString()}</strong>
                   </div>
-                )}
+                  <div style={{ fontSize: "13px", color: "var(--muted)", marginTop: "4px" }}>
+                    <span>Due Date: </span>
+                    <strong style={{ color: "var(--foreground)" }}>{selectedInvoice.due_date || "Due on receipt"}</strong>
+                  </div>
+                  {selectedInvoice.paid_at && (
+                    <div style={{ fontSize: "13px", color: "#10b981", marginTop: "4px" }}>
+                      <span>Settled On: </span>
+                      <strong>{new Date(selectedInvoice.paid_at).toLocaleDateString()}</strong>
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
 
-            {/* Line Items Table */}
-            <table style={{ width: "100%", borderCollapse: "collapse", margin: "20px 0" }}>
-              <thead>
-                <tr style={{ borderBottom: "2px solid var(--line-strong)", textAlign: "left" }}>
-                  <th style={{ padding: "10px 8px", fontSize: "12px", textTransform: "uppercase", letterSpacing: ".08em", color: "var(--subtle)" }}>Description / Scope</th>
-                  <th style={{ padding: "10px 8px", fontSize: "12px", textTransform: "uppercase", letterSpacing: ".08em", color: "var(--subtle)", textAlign: "right" }}>Amount</th>
-                </tr>
-              </thead>
-              <tbody>
-                {selectedInvoice.items && selectedInvoice.items.length > 0 ? (
-                  selectedInvoice.items.map((item: { description: string; amount_cents: number }, idx: number) => (
-                    <tr key={idx} style={{ borderBottom: "1px solid var(--line)" }}>
-                      <td style={{ padding: "14px 8px", fontSize: "14px" }}>{item.description}</td>
+              {/* Line Items Table */}
+              <table style={{ width: "100%", borderCollapse: "collapse", margin: "20px 0" }}>
+                <thead>
+                  <tr style={{ borderBottom: "2px solid var(--line-strong)", textAlign: "left" }}>
+                    <th style={{ padding: "10px 8px", fontSize: "12px", textTransform: "uppercase", letterSpacing: ".08em", color: "var(--subtle)" }}>Description / Scope</th>
+                    <th style={{ padding: "10px 8px", fontSize: "12px", textTransform: "uppercase", letterSpacing: ".08em", color: "var(--subtle)", textAlign: "right" }}>Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {selectedInvoice.items && selectedInvoice.items.length > 0 ? (
+                    selectedInvoice.items.map((item: { description: string; amount_cents: number }, idx: number) => (
+                      <tr key={idx} style={{ borderBottom: "1px solid var(--line)" }}>
+                        <td style={{ padding: "14px 8px", fontSize: "14px" }}>{item.description}</td>
+                        <td style={{ padding: "14px 8px", fontSize: "14px", fontWeight: 600, textAlign: "right" }}>
+                          {formatCurrency(item.amount_cents)}
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr style={{ borderBottom: "1px solid var(--line)" }}>
+                      <td style={{ padding: "14px 8px", fontSize: "14px" }}>
+                        Professional Software Engineering &amp; Platform Delivery Services
+                        {selectedInvoice.notes && <small style={{ display: "block", color: "var(--muted)", marginTop: "4px" }}>{selectedInvoice.notes}</small>}
+                      </td>
                       <td style={{ padding: "14px 8px", fontSize: "14px", fontWeight: 600, textAlign: "right" }}>
-                        {formatCurrency(item.amount_cents)}
+                        {formatCurrency(selectedInvoice.amount_cents)}
                       </td>
                     </tr>
-                  ))
-                ) : (
-                  <tr style={{ borderBottom: "1px solid var(--line)" }}>
-                    <td style={{ padding: "14px 8px", fontSize: "14px" }}>
-                      Professional Software Engineering &amp; Platform Delivery Services
-                      {selectedInvoice.notes && <small style={{ display: "block", color: "var(--muted)", marginTop: "4px" }}>{selectedInvoice.notes}</small>}
-                    </td>
-                    <td style={{ padding: "14px 8px", fontSize: "14px", fontWeight: 600, textAlign: "right" }}>
-                      {formatCurrency(selectedInvoice.amount_cents)}
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+                  )}
+                </tbody>
+              </table>
 
-            {/* Totals Summary */}
-            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "16px" }}>
-              <div style={{ width: "260px", display: "grid", gap: "8px" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "13px", color: "var(--muted)" }}>
-                  <span>Subtotal:</span>
-                  <span>{formatCurrency(selectedInvoice.amount_cents)}</span>
-                </div>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "13px", color: "var(--muted)" }}>
-                  <span>Tax / GST:</span>
-                  <span>0.00 (Export Reverse Charge)</span>
-                </div>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "16px", fontWeight: 700, borderTop: "2px solid var(--line-strong)", paddingTop: "8px" }}>
-                  <span>Total Due:</span>
-                  <span style={{ color: "var(--gold-ink)" }}>{formatCurrency(selectedInvoice.amount_cents)}</span>
+              {/* Totals Summary */}
+              <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "16px" }}>
+                <div style={{ width: "280px", display: "grid", gap: "8px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "13px", color: "var(--muted)" }}>
+                    <span>Subtotal:</span>
+                    <span>{formatCurrency(itemsSubtotalCents)}</span>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "13px", color: "var(--muted)" }}>
+                    <span>Tax / GST:</span>
+                    <span>$0.00 (Export Reverse Charge)</span>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "13px", color: "var(--muted)", borderTop: "1px solid var(--line)", paddingTop: "6px" }}>
+                    <span>Total Invoiced:</span>
+                    <span style={{ fontWeight: 600, color: "var(--foreground)" }}>{formatCurrency(selectedInvoice.amount_cents)}</span>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "13px", color: isPaid ? "#10b981" : "var(--muted)" }}>
+                    <span>Amount Paid:</span>
+                    <span>{formatCurrency(paidAmountCents)}</span>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "16px", fontWeight: 700, borderTop: "2px solid var(--line-strong)", paddingTop: "8px" }}>
+                    <span>Balance Due:</span>
+                    <span style={{ color: isPaid ? "#10b981" : "var(--gold-ink)" }}>
+                      {isPaid ? "$0.00 (Settled)" : formatCurrency(balanceDueCents)}
+                    </span>
+                  </div>
                 </div>
               </div>
-            </div>
 
-            {/* Remittance & Bank Settlement Notes */}
-            <div style={{ marginTop: "32px", padding: "16px", border: "1px solid var(--line)", borderRadius: "10px", background: "var(--surface)", fontSize: "12px", color: "var(--muted)", lineHeight: "1.6" }}>
-              <strong style={{ color: "var(--foreground)", display: "block", marginBottom: "4px" }}>Settlement &amp; Remittance Information</strong>
-              <span>Payment is settled via Wire Transfer (SWIFT / ACH) or verified enterprise gateway. Please quote invoice reference <strong>{selectedInvoice.invoice_number}</strong> on all transfer slips. For questions, contact <a href="mailto:billing@thecodexthrill.com" style={{ color: "var(--gold)" }}>billing@thecodexthrill.com</a>.</span>
+              {/* Remittance & Bank Settlement Notes */}
+              <div style={{ marginTop: "32px", padding: "16px", border: "1px solid var(--line)", borderRadius: "10px", background: "var(--surface)", fontSize: "12px", color: "var(--muted)", lineHeight: "1.6" }}>
+                <strong style={{ color: "var(--foreground)", display: "block", marginBottom: "4px" }}>Settlement &amp; Remittance Information</strong>
+                <span>Payment is settled via Wire Transfer (SWIFT / ACH) or verified enterprise gateway. Please quote invoice reference <strong>{selectedInvoice.invoice_number}</strong> on all transfer slips. For questions, contact <a href="mailto:billing@thecodexthrill.com" style={{ color: "var(--gold)" }}>billing@thecodexthrill.com</a>.</span>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 }
