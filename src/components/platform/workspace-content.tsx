@@ -18,6 +18,11 @@ import {
 } from "@/lib/supabase/lead-actions";
 import { extractLeadService, getLeadFollowUpStatus } from "@/lib/supabase/lead-service-helper";
 import {
+  classifyInvoiceLifecycleStatus,
+  parseDeliveryDescription,
+  redactInternalNotesForClient,
+} from "@/lib/supabase/delivery-operations-helper";
+import {
   CmsPagesManager,
   CmsBlogManager,
   CmsPortfolioManager,
@@ -43,6 +48,7 @@ import {
 import {
   ProjectManager,
   type ProjectRecord,
+  type ProjectDeliverableSummary,
 } from "@/components/platform/project-manager";
 import {
   DocumentManager,
@@ -66,21 +72,21 @@ const sections: Record<string, { title: string; description: string; status: str
   overview: { title: "Workspace overview", description: "Your workspace entry point and available modules.", status: "Core identity and access foundation" },
   leads: { title: "Platform sales leads", description: "TheCodexThrill's platform-owned prospect records.", status: "Connected to Supabase Cloud" },
   clients: { title: "Organizations", description: "Organizations and current lifecycle state.", status: "Core identity schema" },
-  projects: { title: "Projects", description: "Project delivery records and ownership.", status: "Phase 2 delivery module" },
-  tasks: { title: "Tasks", description: "Work items, assignees, and due dates.", status: "Phase 2 delivery module" },
+  projects: { title: "Projects", description: "Project delivery records and ownership.", status: "Phase 3 delivery module" },
+  tasks: { title: "Tasks", description: "Work items, assignees, and due dates.", status: "Phase 3 delivery module" },
   team: { title: "Team", description: "Invited platform users and staff access.", status: "Invitation lifecycle is active" },
   roles: { title: "Roles & access", description: "Current role assignments and access boundaries.", status: "Role-Based Access Control matrix & invariants" },
   content: { title: "CMS pages", description: "Public page content and publication state.", status: "Phase 2 delivery module" },
   blog: { title: "Blog", description: "Editorial drafts and publication state.", status: "Phase 2 delivery module" },
   portfolio: { title: "Portfolio", description: "Work approved for public display.", status: "Phase 2 delivery module" },
-  support: { title: "Support", description: "Support requests and queue ownership.", status: "Phase 2 delivery module" },
-  files: { title: "Files", description: "Organization-scoped file metadata and access.", status: "Phase 2 delivery module" },
-  billing: { title: "Billing", description: "Invoices and payment status.", status: "Phase 2 delivery module" },
+  support: { title: "Support", description: "Support requests and queue ownership.", status: "Phase 3 delivery module" },
+  files: { title: "Files", description: "Organization-scoped file metadata and access.", status: "Phase 3 delivery module" },
+  billing: { title: "Billing", description: "Invoices and payment status.", status: "Phase 3 commercial module" },
   analytics: { title: "Analytics", description: "Reports derived from connected records.", status: "Live platform & pipeline analytics" },
   notifications: { title: "Notifications", description: "Account and workspace notifications.", status: "Real-time security & system notices" },
   settings: { title: "Settings", description: "Your account and organization settings.", status: "Account & session security settings" },
   "audit-logs": { title: "Audit events", description: "Traceable records of privileged activity.", status: "Live database audit trail" },
-  invoices: { title: "Invoices", description: "Invoices and commercial payment history.", status: "Phase 2 delivery module" },
+  invoices: { title: "Invoices", description: "Invoices and commercial payment history.", status: "Phase 3 commercial module" },
 };
 
 const stages = ["new", "contacted", "qualified", "converted", "closed"] as const;
@@ -111,30 +117,154 @@ export async function WorkspaceContent({
 
   if (kind === "portal" && key === "overview") {
     const supabase = await createClient();
-    const { data: memberships } = await supabase
-      .from("organization_memberships")
-      .select("organization_id, status, organizations(name, status)")
-      .eq("status", "active");
+    const [membershipsRes, projectsRes, tasksRes, docsRes, invoicesRes, ticketsRes] = await Promise.all([
+      supabase
+        .from("organization_memberships")
+        .select("organization_id, role, status, organizations(id, name, status)")
+        .eq("status", "active"),
+      supabase
+        .from("tenant_projects")
+        .select("id, organization_id, name, description, status, progress_pct, target_date")
+        .order("created_at", { ascending: false }),
+      supabase
+        .from("tenant_tasks")
+        .select("id, organization_id, status"),
+      supabase
+        .from("tenant_documents")
+        .select("id, organization_id, name, category, file_url, created_at")
+        .order("created_at", { ascending: false }),
+      supabase
+        .from("tenant_invoices")
+        .select("id, organization_id, invoice_number, amount_cents, status, due_date, items"),
+      supabase
+        .from("support_tickets")
+        .select("id, organization_id, status"),
+    ]);
+
+    const memberships = membershipsRes.data ?? [];
+    const allowedOrgIds = new Set(memberships.map((m) => m.organization_id));
+
+    const portalProjects = (projectsRes.data ?? [])
+      .filter((p) => allowedOrgIds.has(p.organization_id))
+      .map((p) => ({
+        ...p,
+        description: redactInternalNotesForClient(p.description),
+      }));
+    const portalTasks = (tasksRes.data ?? []).filter((t) => allowedOrgIds.has(t.organization_id));
+    const portalDocs = (docsRes.data ?? []).filter((d) => allowedOrgIds.has(d.organization_id));
+    const portalInvoices = (invoicesRes.data ?? []).filter((inv) => allowedOrgIds.has(inv.organization_id));
+    const portalTickets = (ticketsRes.data ?? []).filter(
+      (t) => !t.organization_id || allowedOrgIds.has(t.organization_id)
+    );
+
+    const avgProgress =
+      portalProjects.length > 0
+        ? Math.round(portalProjects.reduce((sum, p) => sum + (p.progress_pct || 0), 0) / portalProjects.length)
+        : 0;
+    const openTasksCount = portalTasks.filter((t) => t.status !== "done").length;
+    const doneTasksCount = portalTasks.filter((t) => t.status === "done").length;
+    const deliverablesCount = portalDocs.filter((d) => d.category === "deliverable").length;
+
+    const invoiceEvaluations = portalInvoices.map((inv) => classifyInvoiceLifecycleStatus(inv));
+    const totalOutstandingCents = invoiceEvaluations.reduce((sum, c) => sum + c.balanceDueCents, 0);
+    const settledInvoicesCount = invoiceEvaluations.filter((c) => c.displayStatus === "settled").length;
+    const openTicketsCount = portalTickets.filter((t) => t.status !== "closed" && t.status !== "resolved").length;
+
+    const formatUsd = (cents: number) =>
+      new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(cents / 100);
 
     return <div className="workspace-content">
       <section className="module-panel">
-        <p className="eyebrow">CLIENT PORTAL</p>
+        <p className="eyebrow">CLIENT DELIVERY PORTAL</p>
         <h2>Your workspace overview</h2>
-        <p>Access your organization projects, deliverables, invoices, and support requests.</p>
+        <p>Live status of your software engineering projects, milestones, deliverables, commercial statements, and support queue.</p>
         <div className="module-stat-grid" style={{ marginTop: "20px" }}>
-          <Link className="module-stat" href="/portal/projects"><span>Projects</span><strong>Active</strong><small>Delivery &amp; milestones</small></Link>
-          <Link className="module-stat" href="/portal/tasks"><span>Tasks</span><strong>In progress</strong><small>Work items</small></Link>
-          <Link className="module-stat" href="/portal/files"><span>Files</span><strong>Shared</strong><small>Documents &amp; assets</small></Link>
-          <Link className="module-stat" href="/portal/support"><span>Support</span><strong>Open queue</strong><small>Help requests</small></Link>
+          <Link className="module-stat" href="/portal/projects">
+            <span>Projects</span>
+            <strong>{portalProjects.length} Active</strong>
+            <small>{portalProjects.length > 0 ? `${avgProgress}% avg completion` : "Delivery & milestones"}</small>
+          </Link>
+          <Link className="module-stat" href="/portal/tasks">
+            <span>Tasks</span>
+            <strong>{openTasksCount} Open</strong>
+            <small>{doneTasksCount} completed work items</small>
+          </Link>
+          <Link className="module-stat" href="/portal/files">
+            <span>Deliverables &amp; Files</span>
+            <strong>{portalDocs.length} Shared</strong>
+            <small>{deliverablesCount} project deliverables</small>
+          </Link>
+          <Link className="module-stat" href="/portal/invoices">
+            <span>Invoices &amp; Billing</span>
+            <strong style={{ color: totalOutstandingCents > 0 ? "var(--gold)" : "inherit" }}>
+              {formatUsd(totalOutstandingCents)}
+            </strong>
+            <small>{settledInvoicesCount} settled statements</small>
+          </Link>
+          <Link className="module-stat" href="/portal/support">
+            <span>Support</span>
+            <strong>{openTicketsCount} Active</strong>
+            <small>Direct engineering desk</small>
+          </Link>
         </div>
       </section>
 
-      <section className="module-panel">
-        <h2>Active organizations</h2>
-        {memberships && memberships.length > 0 ? (
+      {portalProjects.length > 0 && (
+        <section className="module-panel">
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px", marginBottom: "14px" }}>
+            <div>
+              <p className="eyebrow">PROJECT DELIVERY TRACKER</p>
+              <h2 style={{ margin: "4px 0 0" }}>Active Engineering Engagements</h2>
+            </div>
+            <Link className="button button-secondary button-small" href="/portal/projects">
+              Open All Projects
+            </Link>
+          </div>
           <div className="module-table-wrap">
             <table className="module-table">
-              <thead><tr><th>Organization</th><th>Status</th><th>Access</th></tr></thead>
+              <thead>
+                <tr>
+                  <th>Project &amp; Milestone</th>
+                  <th>Status</th>
+                  <th>Progress</th>
+                  <th>Target Delivery</th>
+                </tr>
+              </thead>
+              <tbody>
+                {portalProjects.slice(0, 5).map((p) => {
+                  const parsed = parseDeliveryDescription(p.description);
+                  return (
+                    <tr key={p.id}>
+                      <td>
+                        <strong>{p.name}</strong>
+                        {parsed.milestone && (
+                          <small style={{ display: "block", color: "var(--gold)" }}>
+                            {parsed.milestone}
+                          </small>
+                        )}
+                      </td>
+                      <td>
+                        <span className="record-status" style={{ textTransform: "uppercase", fontSize: "11px" }}>
+                          {p.status.replace("_", " ")}
+                        </span>
+                      </td>
+                      <td><strong>{p.progress_pct}%</strong></td>
+                      <td>{p.target_date ?? "Scheduled"}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
+      <section className="module-panel">
+        <h2>Active organizations</h2>
+        {memberships.length > 0 ? (
+          <div className="module-table-wrap">
+            <table className="module-table">
+              <thead><tr><th>Organization</th><th>Status</th><th>Portal Role</th></tr></thead>
               <tbody>
                 {memberships.map((m) => {
                   const org = Array.isArray(m.organizations) ? m.organizations[0] : m.organizations;
@@ -142,7 +272,7 @@ export async function WorkspaceContent({
                     <tr key={m.organization_id}>
                       <td><strong>{org?.name ?? "Organization"}</strong></td>
                       <td><span className="record-status">{org?.status ?? m.status}</span></td>
-                      <td>Active member</td>
+                      <td style={{ textTransform: "capitalize" }}>{(m.role ?? "member").replaceAll("_", " ")}</td>
                     </tr>
                   );
                 })}
@@ -841,7 +971,7 @@ export async function WorkspaceContent({
       supabase.rpc("list_platform_invitations"),
       supabase.from("tenant_projects").select("status, progress_pct, created_at, name"),
       supabase.from("tenant_tasks").select("status, priority, created_at"),
-      supabase.from("tenant_invoices").select("amount_cents, status, currency, due_date, paid_at, created_at"),
+      supabase.from("tenant_invoices").select("amount_cents, status, currency, due_date, paid_at, created_at, items"),
       supabase.from("support_tickets").select("status, priority, category, created_at"),
     ]);
 
@@ -1196,7 +1326,7 @@ export async function WorkspaceContent({
 
   if (key === "projects" || key === "tasks") {
     const supabase = await createClient();
-    const [projectsResult, orgsResult] = await Promise.all([
+    const [projectsResult, orgsResult, docsResult, staffResult] = await Promise.all([
       supabase
         .from("tenant_projects")
         .select("*, tasks:tenant_tasks(*)")
@@ -1204,6 +1334,13 @@ export async function WorkspaceContent({
       kind === "admin"
         ? supabase.from("organizations").select("id, name").eq("status", "active")
         : supabase.from("organization_memberships").select("organization_id, organizations(id, name)").eq("status", "active"),
+      supabase
+        .from("tenant_documents")
+        .select("id, project_id, organization_id, name, file_url, category, created_at")
+        .order("created_at", { ascending: false }),
+      kind === "admin"
+        ? supabase.rpc("list_platform_users")
+        : Promise.resolve({ data: null, error: null }),
     ]);
 
     const rawProjects = (projectsResult.data ?? []) as ProjectRecord[];
@@ -1216,15 +1353,41 @@ export async function WorkspaceContent({
     ) as { id: string; name: string }[];
 
     const userOrgIds = new Set(orgs.map((o) => o.id));
-    const projects = kind === "admin"
+    const filteredProjects = kind === "admin"
       ? rawProjects
       : rawProjects.filter((p) => userOrgIds.has(p.organization_id));
+
+    // Server-side redaction of internal staff notes before sending records to Client Portal
+    const projects: ProjectRecord[] = kind === "admin"
+      ? filteredProjects
+      : filteredProjects.map((p) => ({
+          ...p,
+          description: redactInternalNotesForClient(p.description),
+          tasks: (p.tasks ?? []).map((t) => ({
+            ...t,
+            description: redactInternalNotesForClient(t.description),
+          })),
+        }));
+
+    const rawDocs = (docsResult.data ?? []) as ProjectDeliverableSummary[];
+    const documents = kind === "admin"
+      ? rawDocs
+      : rawDocs.filter((d) => userOrgIds.has(d.organization_id));
+
+    const staffMembers = kind === "admin" && Array.isArray(staffResult.data)
+      ? (staffResult.data as { user_id: string; email: string; display_name: string | null }[]).map((u) => ({
+          id: u.user_id,
+          label: u.display_name ? `${u.display_name} (${u.email})` : u.email,
+        }))
+      : [];
 
     return (
       <ProjectManager
         projects={projects}
         isStaff={kind === "admin"}
         userOrganizations={orgs}
+        staffMembers={staffMembers}
+        documents={documents}
         currentMode={key === "tasks" ? "tasks" : "projects"}
         notice={notice}
         queryError={projectsResult.error?.message}
@@ -1234,7 +1397,7 @@ export async function WorkspaceContent({
 
   if (key === "files") {
     const supabase = await createClient();
-    const [documentsResult, orgsResult] = await Promise.all([
+    const [documentsResult, orgsResult, projectsResult] = await Promise.all([
       supabase
         .from("tenant_documents")
         .select("*")
@@ -1242,6 +1405,10 @@ export async function WorkspaceContent({
       kind === "admin"
         ? supabase.from("organizations").select("id, name").eq("status", "active")
         : supabase.from("organization_memberships").select("organization_id, organizations(id, name)").eq("status", "active"),
+      supabase
+        .from("tenant_projects")
+        .select("id, organization_id, name")
+        .order("created_at", { ascending: false }),
     ]);
 
     const rawDocuments = (documentsResult.data ?? []) as DocumentRecord[];
@@ -1258,11 +1425,17 @@ export async function WorkspaceContent({
       ? rawDocuments
       : rawDocuments.filter((d) => userOrgIds.has(d.organization_id));
 
+    const rawProjects = (projectsResult.data ?? []) as { id: string; organization_id: string; name: string }[];
+    const projects = kind === "admin"
+      ? rawProjects
+      : rawProjects.filter((p) => userOrgIds.has(p.organization_id));
+
     return (
       <DocumentManager
         documents={documents}
         isStaff={kind === "admin"}
         userOrganizations={orgs}
+        projects={projects}
         notice={notice}
         queryError={documentsResult.error?.message}
       />
@@ -1271,7 +1444,7 @@ export async function WorkspaceContent({
 
   if ((kind === "admin" && key === "billing") || (kind === "portal" && key === "invoices")) {
     const supabase = await createClient();
-    const [invoicesResult, orgsResult] = await Promise.all([
+    const [invoicesResult, orgsResult, projectsResult] = await Promise.all([
       supabase
         .from("tenant_invoices")
         .select("*")
@@ -1279,6 +1452,10 @@ export async function WorkspaceContent({
       kind === "admin"
         ? supabase.from("organizations").select("id, name").eq("status", "active")
         : supabase.from("organization_memberships").select("organization_id, organizations(id, name)").eq("status", "active"),
+      supabase
+        .from("tenant_projects")
+        .select("id, organization_id, name")
+        .order("created_at", { ascending: false }),
     ]);
 
     const rawInvoices = (invoicesResult.data ?? []) as InvoiceRecord[];
@@ -1297,11 +1474,17 @@ export async function WorkspaceContent({
       ? rawInvoices
       : rawInvoices.filter((inv) => userOrgIds.has(inv.organization_id));
 
+    const rawProjects = (projectsResult.data ?? []) as { id: string; organization_id: string; name: string }[];
+    const projects = kind === "admin"
+      ? rawProjects
+      : rawProjects.filter((p) => userOrgIds.has(p.organization_id));
+
     return (
       <BillingManager
         invoices={invoices}
         isStaff={kind === "admin"}
         userOrganizations={orgs}
+        projects={projects}
         notice={notice}
         queryError={invoicesResult.error?.message}
       />

@@ -25,6 +25,7 @@ type DocumentManagerProps = {
   documents: DocumentRecord[];
   isStaff: boolean;
   userOrganizations?: { id: string; name: string }[];
+  projects?: { id: string; organization_id: string; name: string }[];
   notice?: string;
   queryError?: string;
 };
@@ -33,16 +34,27 @@ export function DocumentManager({
   documents,
   isStaff,
   userOrganizations = [],
+  projects = [],
   notice,
   queryError,
 }: DocumentManagerProps) {
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
+  const [selectedOrgId, setSelectedOrgId] = useState<string>(userOrganizations[0]?.id ?? "");
 
   const filteredDocs = documents.filter((d) => {
     if (categoryFilter === "all") return true;
     return d.category === categoryFilter;
   });
+
+  const orgProjects = projects.filter(
+    (p) => !selectedOrgId || p.organization_id === selectedOrgId
+  );
+
+  const resolveProjectName = (projectId: string | null) => {
+    if (!projectId) return null;
+    return projects.find((p) => p.id === projectId)?.name ?? null;
+  };
 
   return (
     <div className="workspace-content" style={{ display: "grid", gap: "24px" }}>
@@ -64,7 +76,7 @@ export function DocumentManager({
 
       {notice && (
         <p className={notice === "invalid" || notice === "save" ? "module-alert" : "module-success"} role="status">
-          {notice === "created" ? "Document record created." : notice === "deleted" ? "Document record deleted." : notice}
+          {notice === "created" ? "Document record created and shared with organization." : notice === "deleted" ? "Document record deleted." : notice}
         </p>
       )}
 
@@ -78,9 +90,9 @@ export function DocumentManager({
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "16px" }}>
         <div>
-          <h2 style={{ fontSize: "20px", fontWeight: 700, margin: 0 }}>Documents &amp; Deliverables</h2>
+          <h2 style={{ fontSize: "20px", fontWeight: 700, margin: 0 }}>Documents &amp; Project Deliverables</h2>
           <p style={{ margin: "4px 0 0", color: "var(--muted)", fontSize: "14px" }}>
-            Secure repository of technical specifications, contracts, architecture decks, and shared project assets.
+            Secure repository of technical specifications, contracts, architecture decks, and project handover deliverables.
           </p>
         </div>
 
@@ -91,7 +103,7 @@ export function DocumentManager({
             className="button button-gold"
             style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}
           >
-            <Plus size={16} /> Register Document
+            <Plus size={16} /> Register Deliverable / Document
           </button>
         )}
       </div>
@@ -100,7 +112,7 @@ export function DocumentManager({
       {showUploadModal && userOrganizations.length > 0 && (
         <section className="module-panel" style={{ border: "1px solid var(--gold)" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <h3 style={{ fontSize: "18px", margin: 0 }}>Register Document Record</h3>
+            <h3 style={{ fontSize: "18px", margin: 0 }}>Register Deliverable or Document</h3>
             <button
               type="button"
               onClick={() => setShowUploadModal(false)}
@@ -113,18 +125,36 @@ export function DocumentManager({
 
           <form action={createDocumentRecordAction} encType="multipart/form-data" className="auth-form" style={{ marginTop: "16px", display: "grid", gap: "14px" }}>
             <input type="hidden" name="return_path" value={isStaff ? "admin" : "portal"} />
-            <label>
-              Organization
-              <select name="organization_id" defaultValue={userOrganizations[0]?.id}>
-                {userOrganizations.map((org) => (
-                  <option key={org.id} value={org.id}>{org.name}</option>
-                ))}
-              </select>
-            </label>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+              <label>
+                Organization
+                <select
+                  name="organization_id"
+                  value={selectedOrgId}
+                  onChange={(e) => setSelectedOrgId(e.target.value)}
+                >
+                  {userOrganizations.map((org) => (
+                    <option key={org.id} value={org.id}>{org.name}</option>
+                  ))}
+                </select>
+              </label>
+
+              <label>
+                Linked Delivery Project (Optional)
+                <select name="project_id" defaultValue="">
+                  <option value="">General Organization Document</option>
+                  {orgProjects.map((proj) => (
+                    <option key={proj.id} value={proj.id}>
+                      {proj.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
 
             <label>
-              Document Name
-              <input name="name" required maxLength={255} placeholder="e.g., Master Services Agreement (2026-Q4)" />
+              Document / Deliverable Name
+              <input name="name" required maxLength={255} placeholder="e.g., Phase 1 Architecture Specification & Runbook" />
             </label>
 
             <div style={{ display: "grid", gap: "8px", background: "rgba(255, 255, 255, 0.02)", padding: "12px", borderRadius: "6px", border: "1px solid var(--border)" }}>
@@ -134,7 +164,7 @@ export function DocumentManager({
               </label>
               <div style={{ textAlign: "center", color: "var(--muted)", fontSize: "11px" }}>— OR —</div>
               <label style={{ fontSize: "13px" }}>
-                Option B: External Resource URL (Figma, GitHub, Shared Cloud Link)
+                Option B: External Resource URL (Figma, GitHub Release, Shared Cloud Link)
                 <input name="file_url" type="url" placeholder="https://..." style={{ fontSize: "12px", marginTop: "4px" }} />
               </label>
             </div>
@@ -142,9 +172,9 @@ export function DocumentManager({
             <label>
               Category
               <select name="category" defaultValue="deliverable">
-                <option value="contract">Contract / Legal</option>
                 <option value="deliverable">Deliverable</option>
                 <option value="specification">Specification / Architecture</option>
+                <option value="contract">Contract / Legal</option>
                 <option value="invoice">Invoice / Financial</option>
                 <option value="asset">Asset / Media</option>
                 <option value="other">Other</option>
@@ -160,7 +190,7 @@ export function DocumentManager({
 
       {/* Filter and Table */}
       <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-        {["all", "deliverable", "contract", "specification", "invoice", "asset"].map((cat) => (
+        {["all", "deliverable", "specification", "contract", "invoice", "asset"].map((cat) => (
           <button
             key={cat}
             type="button"
@@ -193,58 +223,69 @@ export function DocumentManager({
           <table className="module-table">
             <thead>
               <tr>
-                <th>Document</th>
+                <th>Document / Deliverable</th>
+                <th>Project</th>
                 <th>Category</th>
                 <th>Date Added</th>
                 <th>Action</th>
               </tr>
             </thead>
             <tbody>
-              {filteredDocs.map((doc) => (
-                <tr key={doc.id}>
-                  <td>
-                    <strong>{doc.name}</strong>
-                  </td>
-                  <td>
-                    <span className="record-status" style={{ fontSize: "11px", textTransform: "uppercase" }}>
-                      {doc.category}
-                    </span>
-                  </td>
-                  <td>{new Date(doc.created_at).toLocaleDateString()}</td>
-                  <td>
-                    <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-                      <a
-                        href={doc.file_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="button button-secondary"
-                        style={{ padding: "4px 8px", fontSize: "12px", display: "inline-flex", alignItems: "center", gap: "6px" }}
-                      >
-                        Open <ExternalLink size={12} />
-                      </a>
-                      {isStaff && (
-                        <form
-                          action={deleteDocumentAction}
-                          onSubmit={(e) => {
-                            if (!confirm(`Are you sure you want to delete "${doc.name}"?`)) e.preventDefault();
-                          }}
-                        >
-                          <input type="hidden" name="id" value={doc.id} />
-                          <input type="hidden" name="return_path" value={isStaff ? "admin" : "portal"} />
-                          <button
-                            type="submit"
-                            className="button button-small button-danger"
-                            style={{ padding: "4px 8px", fontSize: "12px" }}
-                            title="Delete document"
-                          >
-                            <Trash2 size={12} />
-                          </button>
-                        </form>
+              {filteredDocs.map((doc) => {
+                const projectName = resolveProjectName(doc.project_id);
+                return (
+                  <tr key={doc.id}>
+                    <td>
+                      <strong>{doc.name}</strong>
+                    </td>
+                    <td>
+                      {projectName ? (
+                        <span style={{ fontSize: "12px", color: "var(--gold)" }}>{projectName}</span>
+                      ) : (
+                        <span style={{ fontSize: "12px", color: "var(--muted)" }}>Organization-wide</span>
                       )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                    </td>
+                    <td>
+                      <span className="record-status" style={{ fontSize: "11px", textTransform: "uppercase" }}>
+                        {doc.category}
+                      </span>
+                    </td>
+                    <td>{new Date(doc.created_at).toLocaleDateString()}</td>
+                    <td>
+                      <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                        <a
+                          href={doc.file_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="button button-secondary"
+                          style={{ padding: "4px 8px", fontSize: "12px", display: "inline-flex", alignItems: "center", gap: "6px" }}
+                        >
+                          Open <ExternalLink size={12} />
+                        </a>
+                        {isStaff && (
+                          <form
+                            action={deleteDocumentAction}
+                            onSubmit={(e) => {
+                              if (!confirm(`Are you sure you want to delete "${doc.name}"?`)) e.preventDefault();
+                            }}
+                          >
+                            <input type="hidden" name="id" value={doc.id} />
+                            <input type="hidden" name="return_path" value={isStaff ? "admin" : "portal"} />
+                            <button
+                              type="submit"
+                              className="button button-small button-danger"
+                              style={{ padding: "4px 8px", fontSize: "12px" }}
+                              title="Delete document"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          </form>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

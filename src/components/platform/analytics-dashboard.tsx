@@ -12,6 +12,7 @@ import {
   AlertCircle,
   ArrowRight,
 } from "lucide-react";
+import { classifyInvoiceLifecycleStatus } from "@/lib/supabase/delivery-operations-helper";
 
 export type AnalyticsLead = {
   stage: string;
@@ -45,6 +46,7 @@ export type AnalyticsInvoice = {
   due_date: string | null;
   paid_at: string | null;
   created_at: string;
+  items?: unknown;
 };
 
 export type AnalyticsTicket = {
@@ -173,18 +175,16 @@ export function AnalyticsDashboard({ data }: { data: AnalyticsData }) {
 
   if (filteredInvoices) {
     for (const inv of filteredInvoices) {
+      const commercial = classifyInvoiceLifecycleStatus(inv);
       if (inv.status in invoiceStatusCounts) invoiceStatusCounts[inv.status] += 1;
-      if (inv.status !== "cancelled" && inv.status !== "draft") {
+      if (commercial.displayStatus !== "cancelled" && commercial.displayStatus !== "draft") {
         totalBilledCents += inv.amount_cents;
       }
-      if (inv.status === "paid") {
-        totalPaidCents += inv.amount_cents;
-      }
-      if (inv.status === "sent") {
-        totalOutstandingCents += inv.amount_cents;
-      }
-      if (inv.status === "overdue") {
-        totalOverdueCents += inv.amount_cents;
+      totalPaidCents += commercial.paidAmountCents;
+      if (commercial.isOverdue) {
+        totalOverdueCents += commercial.balanceDueCents;
+      } else {
+        totalOutstandingCents += commercial.balanceDueCents;
       }
     }
   }

@@ -13,7 +13,7 @@
     "typecheck": "tsc --noEmit",
     "test:bootstrap": "node --experimental-strip-types --test src/lib/supabase/bootstrap-token.test.ts",
     "test:cms": "node --experimental-strip-types --test src/lib/supabase/cms-foundation.test.ts",
-    "test:ops": "node --experimental-strip-types --test src/lib/supabase/operations-foundation.test.ts",
+    "test:ops": "node --experimental-strip-types --test src/lib/supabase/operations-foundation.test.ts src/lib/supabase/delivery-operations.test.ts",
     "test:crm": "node --experimental-strip-types --test src/lib/supabase/lead-conversion-funnel.test.ts",
     "test:auth": "node --experimental-strip-types --test src/lib/supabase/bootstrap-token.test.ts src/lib/supabase/auth-link-status.test.ts src/lib/supabase/invitation-link.test.ts src/lib/supabase/invitation-email-status.test.ts src/lib/supabase/auth-flow.test.ts src/lib/supabase/platform-invitations.test.ts src/lib/supabase/platform-role-management.test.ts src/lib/supabase/invitation-handoff.test.ts src/lib/supabase/invitation-list-regression.test.ts src/lib/supabase/invitation-lifecycle-regression.test.ts",
     "test": "npm run test:auth && npm run test:cms && npm run test:ops && npm run test:crm",
