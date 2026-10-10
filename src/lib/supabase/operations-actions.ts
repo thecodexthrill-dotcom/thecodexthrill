@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { requireWorkspace } from "@/lib/supabase/access";
 
 // ============================================================================
@@ -127,7 +128,7 @@ export async function addTicketMessageAction(formData: FormData) {
   // Automatic ticket lifecycle transition
   const { data: ticket } = await supabase
     .from("support_tickets")
-    .select("status")
+    .select("status, ticket_number, customer_id, assigned_to")
     .eq("id", ticketId.data)
     .single();
 
@@ -145,10 +146,38 @@ export async function addTicketMessageAction(formData: FormData) {
         .update({ status: nextStatus, updated_at: new Date().toISOString() })
         .eq("id", ticketId.data);
     }
+
+    // Dispatch real in-app notification to the counterparty
+    try {
+      const adminSupabase = createAdminClient();
+      if (isStaff && ticket.customer_id && ticket.customer_id !== user.id) {
+        await adminSupabase.from("user_notifications").insert({
+          user_id: ticket.customer_id,
+          title: `Response on Support Ticket #${ticket.ticket_number}`,
+          message: message.data.slice(0, 200),
+          type: "ticket",
+          link_url: "/portal/support",
+          is_read: false,
+        });
+      } else if (!isStaff && ticket.assigned_to && ticket.assigned_to !== user.id) {
+        await adminSupabase.from("user_notifications").insert({
+          user_id: ticket.assigned_to,
+          title: `Client update on Support Ticket #${ticket.ticket_number}`,
+          message: message.data.slice(0, 200),
+          type: "ticket",
+          link_url: "/admin/support",
+          is_read: false,
+        });
+      }
+    } catch {
+      // Notification dispatch is non-blocking to core thread reply
+    }
   }
 
   revalidatePath("/portal/support");
   revalidatePath("/admin/support");
+  revalidatePath("/portal/notifications");
+  revalidatePath("/admin/notifications");
   redirect(`${returnPath}?message_sent=1`);
 }
 
@@ -593,7 +622,24 @@ export async function markNotificationReadAction(formData: FormData) {
 
   revalidatePath("/portal/notifications");
   revalidatePath("/admin/notifications");
-  redirect(returnPath);
+  redirect(`${returnPath}?notice=read`);
+}
+
+export async function markAllNotificationsReadAction(formData: FormData) {
+  const returnPath = formData.get("return_path") === "portal" ? "/portal/notifications" : "/admin/notifications";
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  await supabase
+    .from("user_notifications")
+    .update({ is_read: true })
+    .eq("user_id", user.id)
+    .eq("is_read", false);
+
+  revalidatePath("/portal/notifications");
+  revalidatePath("/admin/notifications");
+  redirect(`${returnPath}?notice=all_read`);
 }
 
 // ============================================================================
