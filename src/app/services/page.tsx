@@ -147,10 +147,18 @@ export default async function ServicesPage() {
                       </ul>
                     </div>
 
-                    <div className="capability-action-line">
+                    <div className="capability-action-line" style={{ display: "flex", gap: "20px", flexWrap: "wrap", alignItems: "center" }}>
                       <Link className="capability-action-link" href={`/services/${service.slug}`}>
                         <span>Explore full {service.title} blueprint</span>
                         <ArrowUpRight aria-hidden="true" size={15} />
+                      </Link>
+                      <Link
+                        className="text-link"
+                        href={`/contact?service=${encodeURIComponent(service.slug)}`}
+                        style={{ fontSize: "13px", display: "inline-flex", alignItems: "center", gap: "5px" }}
+                      >
+                        <span>Enquire about {service.title}</span>
+                        <ArrowRight aria-hidden="true" size={14} />
                       </Link>
                     </div>
                   </div>

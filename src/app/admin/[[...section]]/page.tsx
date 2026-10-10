@@ -10,18 +10,41 @@ export default async function AdminPage({
   searchParams,
 }: {
   params: Promise<{ section?: string[] }>;
-  searchParams: Promise<{ created?: string; updated?: string; error?: string; id?: string }>;
+  searchParams: Promise<{
+    created?: string;
+    updated?: string;
+    deleted?: string;
+    converted?: string;
+    invited?: string;
+    notice?: string;
+    error?: string;
+    id?: string;
+  }>;
 }) {
   const [{ section = [] }, query] = await Promise.all([params, searchParams]);
   const { user, roles } = await requireWorkspace("admin", section);
   const selectedId = query.id || (section.length > 1 ? section[1] : undefined);
+  const noticeState =
+    query.notice ||
+    (query.converted
+      ? "converted"
+      : query.invited
+        ? "invited"
+        : query.created
+          ? "created"
+          : query.updated
+            ? "updated"
+            : query.deleted
+              ? "deleted"
+              : query.error);
+
   return (
     <PlatformShell kind="admin" section={section} roles={roles} userEmail={user.email ?? "Account"}>
       <WorkspaceContent
         kind="admin"
         section={section}
         roles={roles}
-        notice={query.created ? "created" : query.updated ? "updated" : query.error}
+        notice={noticeState}
         selectedId={selectedId}
       />
     </PlatformShell>

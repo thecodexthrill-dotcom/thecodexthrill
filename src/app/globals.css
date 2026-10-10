@@ -795,7 +795,8 @@ body { background: var(--background); }
   font-weight: 400;
 }
 .contact-field-group input,
-.contact-field-group textarea {
+.contact-field-group textarea,
+.contact-field-group select {
   width: 100%;
   min-height: 44px;
   padding: 10px 14px;
@@ -813,7 +814,8 @@ body { background: var(--background); }
   line-height: 1.6;
 }
 .contact-field-group input:focus,
-.contact-field-group textarea:focus {
+.contact-field-group textarea:focus,
+.contact-field-group select:focus {
   outline: none;
   border-color: var(--gold);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--gold) 20%, transparent);

@@ -112,8 +112,14 @@ export default async function ServiceDetailPage({ params }: Props) {
           <h2>Bring us the challenge you’re working through.</h2>
         </div>
         <Button asChild>
-          <Link href={service.ctaUrl || "/contact"}>
-            {service.ctaLabel || "Start a conversation"} <ArrowRight size={16} />
+          <Link
+            href={
+              !service.ctaUrl || service.ctaUrl === "/contact"
+                ? `/contact?service=${encodeURIComponent(service.slug)}`
+                : service.ctaUrl
+            }
+          >
+            {service.ctaLabel || `Enquire about ${service.title}`} <ArrowRight size={16} />
           </Link>
         </Button>
       </section>

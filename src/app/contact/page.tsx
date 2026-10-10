@@ -10,7 +10,16 @@ export const metadata: Metadata = getPageMetadata(
   "/contact",
 );
 
-export default function ContactPage() {
+type ContactPageProps = {
+  searchParams?: Promise<{
+    service?: string;
+    source?: string;
+  }>;
+};
+
+export default async function ContactPage({ searchParams }: ContactPageProps) {
+  const params = searchParams ? await searchParams : {};
+
   return (
     <>
       <PageIntro
@@ -19,7 +28,10 @@ export default function ContactPage() {
         title={<>Let’s talk about what’s <em>next.</em></>}
       />
       <section className="section container-shell">
-        <ContactForm />
+        <ContactForm
+          initialService={params.service}
+          initialSource={params.source || "website"}
+        />
       </section>
     </>
   );

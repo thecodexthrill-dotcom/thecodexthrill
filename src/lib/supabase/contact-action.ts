@@ -2,6 +2,7 @@
 
 import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { formatLeadMessage } from "@/lib/supabase/lead-service-helper";
 
 export type ContactActionState = {
   error?: string;
@@ -24,11 +25,17 @@ const contactEnquirySchema = z.object({
     .trim()
     .max(160, "Company name must be under 160 characters.")
     .optional(),
+  requestedService: z
+    .string()
+    .trim()
+    .max(160)
+    .optional(),
   message: z
     .string()
     .trim()
     .min(10, "Please provide some details about your project or enquiry (at least 10 characters).")
     .max(5000, "Message cannot exceed 5,000 characters."),
+  source: z.enum(["website", "referral", "admin", "import", "other"]).default("website"),
   honeypot: z.string().optional(),
 });
 
@@ -49,7 +56,9 @@ export async function submitContactEnquiryAction(
     contactName: formData.get("contactName"),
     email: formData.get("email"),
     companyName: formData.get("companyName") || undefined,
+    requestedService: formData.get("requestedService") || undefined,
     message: formData.get("message"),
+    source: (formData.get("source") as string) || "website",
     honeypot: typeof honeypot === "string" ? honeypot : undefined,
   };
 
@@ -59,17 +68,45 @@ export async function submitContactEnquiryAction(
     return { error: firstError };
   }
 
+  const normalizedEmail = parsed.data.email.toLowerCase().trim();
+
   try {
     const admin = createAdminClient();
+
+    // Spam / duplicate submission throttle: 120 seconds
+    const throttleThreshold = new Date(Date.now() - 120 * 1000).toISOString();
+    const { data: recentSubmissions } = await admin
+      .from("platform_sales_leads")
+      .select("id")
+      .eq("email", normalizedEmail)
+      .gte("created_at", throttleThreshold)
+      .limit(1);
+
+    if (recentSubmissions && recentSubmissions.length > 0) {
+      return {
+        message:
+          "Thank you for reaching out. We have received your project details and an engineering lead is already reviewing them.",
+      };
+    }
+
+    const formattedMessage = formatLeadMessage(
+      parsed.data.requestedService,
+      parsed.data.message,
+    );
+
+    // Schedule 1 business day follow-up
+    const nextBusinessDay = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+
     const { error: insertError } = await admin
       .from("platform_sales_leads")
       .insert({
         contact_name: parsed.data.contactName,
-        email: parsed.data.email.toLowerCase(),
+        email: normalizedEmail,
         company_name: parsed.data.companyName || null,
-        message: parsed.data.message,
-        source: "website",
+        message: formattedMessage,
+        source: parsed.data.source,
         stage: "new",
+        follow_up_at: nextBusinessDay,
       });
 
     if (insertError) {

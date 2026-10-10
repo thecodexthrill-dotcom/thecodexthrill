@@ -2,13 +2,15 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { Search, CalendarClock } from "lucide-react";
+import { Search, CalendarClock, Layers } from "lucide-react";
+import { extractLeadService, getLeadFollowUpStatus } from "@/lib/supabase/lead-service-helper";
 
 export type LeadListItem = {
   id: string;
   contact_name: string;
   email: string;
   company_name: string | null;
+  message?: string | null;
   stage: string;
   source: string;
   created_at: string;
@@ -25,11 +27,13 @@ export function LeadsTable({ leads }: { leads: LeadListItem[] }) {
     return leads.filter((lead) => {
       const matchesStage = selectedStage === "all" || lead.stage.toLowerCase() === selectedStage;
       const q = searchQuery.toLowerCase().trim();
+      const parsedService = extractLeadService(lead.message).requestedService.toLowerCase();
       const matchesQuery =
         !q ||
         lead.contact_name.toLowerCase().includes(q) ||
         lead.email.toLowerCase().includes(q) ||
-        (lead.company_name && lead.company_name.toLowerCase().includes(q));
+        (lead.company_name && lead.company_name.toLowerCase().includes(q)) ||
+        parsedService.includes(q);
 
       return matchesStage && matchesQuery;
     });
@@ -43,7 +47,7 @@ export function LeadsTable({ leads }: { leads: LeadListItem[] }) {
           <Search size={15} style={{ position: "absolute", left: "12px", top: "50%", transform: "translateY(-50%)", color: "var(--muted)" }} />
           <input
             type="search"
-            placeholder="Search leads by name, email, or company..."
+            placeholder="Search leads by name, email, company, or service..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             style={{
@@ -103,6 +107,7 @@ export function LeadsTable({ leads }: { leads: LeadListItem[] }) {
               <tr>
                 <th>Contact</th>
                 <th>Company</th>
+                <th>Requested Service</th>
                 <th>Stage</th>
                 <th>Source</th>
                 <th>Follow-up</th>
@@ -111,52 +116,90 @@ export function LeadsTable({ leads }: { leads: LeadListItem[] }) {
               </tr>
             </thead>
             <tbody>
-              {filteredLeads.map((lead) => (
-                <tr key={lead.id}>
-                  <td>
-                    <Link
-                      href={`/admin/leads?id=${lead.id}`}
-                      style={{ color: "inherit", textDecoration: "none", display: "grid", gap: "2px" }}
-                    >
-                      <strong style={{ color: "var(--foreground)" }}>{lead.contact_name}</strong>
-                      <small style={{ color: "var(--gold)" }}>{lead.email}</small>
-                    </Link>
-                  </td>
-                  <td>{lead.company_name ?? "—"}</td>
-                  <td>
-                    <span className="record-status">{lead.stage}</span>
-                  </td>
-                  <td>
-                    <span style={{ textTransform: "capitalize" }}>{lead.source}</span>
-                  </td>
-                  <td>
-                    {lead.follow_up_at ? (
+              {filteredLeads.map((lead) => {
+                const serviceInfo = extractLeadService(lead.message);
+                const followUpInfo = getLeadFollowUpStatus(lead.follow_up_at);
+
+                return (
+                  <tr key={lead.id}>
+                    <td>
+                      <Link
+                        href={`/admin/leads?id=${lead.id}`}
+                        style={{ color: "inherit", textDecoration: "none", display: "grid", gap: "2px" }}
+                      >
+                        <strong style={{ color: "var(--foreground)" }}>{lead.contact_name}</strong>
+                        <small style={{ color: "var(--gold)" }}>{lead.email}</small>
+                      </Link>
+                    </td>
+                    <td>{lead.company_name ?? "—"}</td>
+                    <td>
                       <span
                         style={{
                           display: "inline-flex",
                           alignItems: "center",
-                          gap: "4px",
+                          gap: "5px",
                           fontSize: "12px",
-                          color: new Date(lead.follow_up_at) < new Date() ? "#f87171" : "var(--gold-ink)",
+                          fontWeight: 500,
+                          padding: "2px 8px",
+                          borderRadius: "6px",
+                          background: "var(--surface-raised)",
+                          border: "1px solid var(--line)",
+                          color: serviceInfo.requestedService === "General Technical Inquiry" ? "var(--muted)" : "var(--gold-ink)",
                         }}
                       >
-                        <CalendarClock size={13} />
-                        {new Date(lead.follow_up_at).toLocaleDateString()}
+                        <Layers size={11} style={{ opacity: 0.7 }} />
+                        {serviceInfo.requestedService}
                       </span>
-                    ) : (
-                      <span style={{ color: "var(--subtle)", fontSize: "12px" }}>None scheduled</span>
-                    )}
-                  </td>
-                  <td>{new Date(lead.created_at).toLocaleDateString()}</td>
-                  <td>
-                    <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-                      <Link className="button button-small button-secondary" href={`/admin/leads?id=${lead.id}`}>
-                        Open
-                      </Link>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                    </td>
+                    <td>
+                      <span className="record-status">{lead.stage}</span>
+                    </td>
+                    <td>
+                      <span style={{ textTransform: "capitalize" }}>{lead.source}</span>
+                    </td>
+                    <td>
+                      {followUpInfo.status === "overdue" ? (
+                        <span
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "4px",
+                            fontSize: "12px",
+                            fontWeight: 600,
+                            color: "#ef4444",
+                          }}
+                        >
+                          <CalendarClock size={13} />
+                          {followUpInfo.label}
+                        </span>
+                      ) : followUpInfo.status === "scheduled" ? (
+                        <span
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "4px",
+                            fontSize: "12px",
+                            color: "var(--gold-ink)",
+                          }}
+                        >
+                          <CalendarClock size={13} />
+                          {followUpInfo.label}
+                        </span>
+                      ) : (
+                        <span style={{ color: "var(--subtle)", fontSize: "12px" }}>None scheduled</span>
+                      )}
+                    </td>
+                    <td>{new Date(lead.created_at).toLocaleDateString()}</td>
+                    <td>
+                      <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                        <Link className="button button-small button-secondary" href={`/admin/leads?id=${lead.id}`}>
+                          Open
+                        </Link>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

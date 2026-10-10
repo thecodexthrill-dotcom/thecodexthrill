@@ -30,6 +30,11 @@ export default function PricingPage() {
               <h2>{item.title}</h2>
               <p>{item.description}</p>
               <ul>{item.items.map((feature) => <li key={feature}><Check aria-hidden="true" size={16} />{feature}</li>)}</ul>
+              <div style={{ marginTop: "20px", paddingTop: "14px", borderTop: "1px solid var(--line)" }}>
+                <Link className="text-link" href="/contact?service=custom-architecture" style={{ fontSize: "13px", display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                  Scope a {item.title.toLowerCase()} engagement <ArrowRight aria-hidden="true" size={14} />
+                </Link>
+              </div>
             </article>
           ))}
         </div>

@@ -99,9 +99,22 @@ export function AnalyticsDashboard({ data }: { data: AnalyticsData }) {
     converted: 0,
     closed: 0,
   };
+  const sourceCounts: Record<string, number> = {
+    website: 0,
+    referral: 0,
+    admin: 0,
+    import: 0,
+    other: 0,
+  };
   if (filteredLeads) {
     for (const l of filteredLeads) {
       if (l.stage in stageCounts) stageCounts[l.stage] += 1;
+      const src = (l.source ?? "website").toLowerCase();
+      if (src in sourceCounts) {
+        sourceCounts[src] += 1;
+      } else {
+        sourceCounts.other += 1;
+      }
     }
   }
   const convertedLeads = stageCounts.converted;
@@ -372,6 +385,32 @@ export function AnalyticsDashboard({ data }: { data: AnalyticsData }) {
                   </div>
                 );
               })}
+
+              <div style={{ marginTop: "16px", paddingTop: "14px", borderTop: "1px solid var(--line)" }}>
+                <span style={{ fontSize: "12px", color: "var(--muted)", fontWeight: 600, display: "block", marginBottom: "8px" }}>
+                  Inbound Lead Acquisition Channels:
+                </span>
+                <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                  {Object.entries(sourceCounts).map(([src, count]) => {
+                    if (count === 0 && filteredLeads.length > 0) return null;
+                    return (
+                      <span
+                        key={src}
+                        style={{
+                          padding: "3px 8px",
+                          fontSize: "11px",
+                          borderRadius: "6px",
+                          border: "1px solid var(--line)",
+                          background: "var(--surface)",
+                          textTransform: "capitalize",
+                        }}
+                      >
+                        {src}: <strong>{count}</strong>
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
           )}
         </section>

@@ -1,14 +1,31 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useMemo } from "react";
 import Link from "next/link";
 import { ArrowUpRight, CheckCircle2, Clock, Mail, ShieldCheck } from "lucide-react";
 import { submitContactEnquiryAction, type ContactActionState } from "@/lib/supabase/contact-action";
+import { AVAILABLE_SERVICES } from "@/lib/supabase/lead-service-helper";
 
 const initialState: ContactActionState = {};
 
-export function ContactForm() {
+export function ContactForm({
+  initialService,
+  initialSource = "website",
+}: {
+  initialService?: string;
+  initialSource?: string;
+}) {
   const [state, formAction, pending] = useActionState(submitContactEnquiryAction, initialState);
+
+  const resolvedInitialService = useMemo(() => {
+    if (!initialService) return "";
+    const matched = AVAILABLE_SERVICES.find(
+      (s) =>
+        s.slug === initialService.toLowerCase() ||
+        s.title.toLowerCase() === initialService.toLowerCase(),
+    );
+    return matched ? matched.title : initialService;
+  }, [initialService]);
 
   return (
     <div className="contact-grid">
@@ -42,6 +59,9 @@ export function ContactForm() {
               tabIndex={-1}
               type="text"
             />
+
+            {/* Inbound source tracking */}
+            <input name="source" type="hidden" value={initialSource} />
 
             <div className="contact-field-group">
               <label htmlFor="contactName">
@@ -85,6 +105,25 @@ export function ContactForm() {
                 placeholder="Acme Technologies"
                 type="text"
               />
+            </div>
+
+            <div className="contact-field-group">
+              <label htmlFor="requestedService">
+                Service of Interest <span className="contact-optional">(Optional)</span>
+              </label>
+              <select
+                defaultValue={resolvedInitialService}
+                disabled={pending}
+                id="requestedService"
+                name="requestedService"
+              >
+                <option value="">General Technical Inquiry / Advisory</option>
+                {AVAILABLE_SERVICES.map((s) => (
+                  <option key={s.slug} value={s.title}>
+                    {s.title}
+                  </option>
+                ))}
+              </select>
             </div>
 
             <div className="contact-field-group">

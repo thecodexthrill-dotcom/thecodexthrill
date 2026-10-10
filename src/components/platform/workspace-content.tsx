@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowLeft, ArrowRight, ShieldCheck } from "lucide-react";
+import { ArrowLeft, ArrowRight, ShieldCheck, FolderKanban, UserPlus, Layers, CalendarClock } from "lucide-react";
 import { InvitationForm } from "@/components/auth/invitation-form";
 import { InvitationRowActions } from "@/components/auth/invitation-row-actions";
 import { PlatformRoleActions } from "@/components/platform/platform-role-actions";
@@ -13,7 +13,10 @@ import {
   deleteLeadAction,
   createOrganizationAction,
   updateOrganizationAction,
+  convertLeadToClientAction,
+  onboardOrganizationMemberAction,
 } from "@/lib/supabase/lead-actions";
+import { extractLeadService, getLeadFollowUpStatus } from "@/lib/supabase/lead-service-helper";
 import {
   CmsPagesManager,
   CmsBlogManager,
@@ -99,7 +102,7 @@ export async function WorkspaceContent({
 }) {
   const targetId = selectedId || (section.length > 1 ? section[1] : undefined);
   if (section.length > 2) notFound();
-  if (section.length > 1 && section[0] !== "leads" && section[0] !== "projects" && section[0] !== "tasks") notFound();
+  if (section.length > 1 && section[0] !== "leads" && section[0] !== "clients" && section[0] !== "projects" && section[0] !== "tasks") notFound();
   const key = section[0] ?? "overview";
   const page = sections[key];
   if (!page) return <section className="module-hold"><div><strong>Page not found</strong><p>This workspace route does not map to a module.</p><Link className="text-link" href={kind === "admin" ? "/admin" : "/portal"}>Return to overview</Link></div></section>;
@@ -205,6 +208,9 @@ export async function WorkspaceContent({
         );
       }
 
+      const serviceInfo = extractLeadService(lead.message);
+      const followUpInfo = getLeadFollowUpStatus(lead.follow_up_at);
+
       return (
         <div className="workspace-content">
           {notice && <Notice state={notice} />}
@@ -238,17 +244,40 @@ export async function WorkspaceContent({
                 <strong style={{ fontSize: "14px" }}>{lead.company_name || "Direct Individual / Unspecified"}</strong>
               </div>
               <div style={{ padding: "16px", border: "1px solid var(--line)", borderRadius: "12px", background: "var(--surface)" }}>
+                <small style={{ color: "var(--subtle)", fontSize: "11px", textTransform: "uppercase", letterSpacing: ".08em", display: "block" }}>Requested Capability</small>
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    marginTop: "4px",
+                    fontSize: "13px",
+                    fontWeight: 600,
+                    color: serviceInfo.requestedService === "General Technical Inquiry" ? "var(--muted)" : "var(--gold-ink)",
+                  }}
+                >
+                  <Layers size={14} />
+                  {serviceInfo.requestedService}
+                </span>
+              </div>
+              <div style={{ padding: "16px", border: "1px solid var(--line)", borderRadius: "12px", background: "var(--surface)" }}>
                 <small style={{ color: "var(--subtle)", fontSize: "11px", textTransform: "uppercase", letterSpacing: ".08em", display: "block" }}>Inbound Source</small>
                 <strong style={{ fontSize: "14px", textTransform: "capitalize" }}>{lead.source}</strong>
               </div>
               <div style={{ padding: "16px", border: "1px solid var(--line)", borderRadius: "12px", background: "var(--surface)" }}>
-                <small style={{ color: "var(--subtle)", fontSize: "11px", textTransform: "uppercase", letterSpacing: ".08em", display: "block" }}>Created Date &amp; Time</small>
-                <strong style={{ fontSize: "14px" }}>{new Date(lead.created_at).toLocaleString()}</strong>
-              </div>
-              <div style={{ padding: "16px", border: "1px solid var(--line)", borderRadius: "12px", background: "var(--surface)" }}>
                 <small style={{ color: "var(--subtle)", fontSize: "11px", textTransform: "uppercase", letterSpacing: ".08em", display: "block" }}>Scheduled Follow-up</small>
-                <strong style={{ fontSize: "14px" }}>
-                  {lead.follow_up_at ? new Date(lead.follow_up_at).toLocaleString() : "None scheduled"}
+                <strong
+                  style={{
+                    fontSize: "14px",
+                    color: followUpInfo.status === "overdue" ? "#ef4444" : followUpInfo.status === "scheduled" ? "var(--gold-ink)" : "inherit",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "5px",
+                    marginTop: "2px",
+                  }}
+                >
+                  {followUpInfo.status !== "none" && <CalendarClock size={14} />}
+                  {followUpInfo.label}
                 </strong>
               </div>
               <div style={{ padding: "16px", border: "1px solid var(--line)", borderRadius: "12px", background: "var(--surface)" }}>
@@ -258,11 +287,79 @@ export async function WorkspaceContent({
             </div>
 
             <div style={{ marginTop: "24px", padding: "20px", border: "1px solid var(--line)", borderRadius: "14px", background: "var(--surface)" }}>
-              <h3 style={{ fontSize: "15px", margin: "0 0 10px" }}>Project Overview &amp; Message Notes</h3>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px", flexWrap: "wrap", gap: "8px" }}>
+                <h3 style={{ fontSize: "15px", margin: 0 }}>Project Overview &amp; Message Notes</h3>
+                {serviceInfo.requestedService !== "General Technical Inquiry" && (
+                  <span className="record-status" style={{ fontSize: "11px" }}>
+                    {serviceInfo.requestedService}
+                  </span>
+                )}
+              </div>
               <p style={{ color: "var(--foreground)", whiteSpace: "pre-wrap", lineHeight: "1.7", margin: 0, fontSize: "14px" }}>
-                {lead.message || "No project message recorded."}
+                {serviceInfo.notes || lead.message || "No project message recorded."}
               </p>
             </div>
+
+            {lead.stage !== "converted" ? (
+              <div style={{ marginTop: "24px", padding: "24px", border: "1px solid var(--gold)", borderRadius: "14px", background: "color-mix(in srgb, var(--gold-soft) 25%, var(--surface))" }}>
+                <p className="eyebrow" style={{ color: "var(--gold)" }}>CLIENT ONBOARDING FUNNEL</p>
+                <h3 style={{ fontSize: "17px", margin: "4px 0 10px" }}>Convert Lead to Client Organization</h3>
+                <p style={{ fontSize: "13px", color: "var(--muted)", margin: "0 0 16px", lineHeight: "1.6" }}>
+                  Converts this prospect into an active Client Organization in Supabase Cloud, provisions an initial Delivery Handover Project in tenant_projects, logs an immutable audit event, and initiates client portal access.
+                </p>
+                <form action={convertLeadToClientAction} className="auth-form lead-create-form">
+                  <input type="hidden" name="lead_id" value={lead.id} />
+                  <label>
+                    Organization Name *
+                    <input
+                      name="organization_name"
+                      defaultValue={lead.company_name || `${lead.contact_name}'s Organization`}
+                      required
+                      maxLength={160}
+                    />
+                  </label>
+                  <label>
+                    Handover Project Name *
+                    <input
+                      name="project_name"
+                      defaultValue={`${lead.company_name || lead.contact_name} — ${serviceInfo.requestedService !== "General Technical Inquiry" ? serviceInfo.requestedService : "Client Delivery"}`}
+                      required
+                      maxLength={200}
+                    />
+                  </label>
+                  <label>
+                    Target Handover Date
+                    <input type="date" name="target_date" />
+                  </label>
+                  <label style={{ gridColumn: "1 / -1" }}>
+                    Project Delivery Scope &amp; Handover Notes
+                    <textarea
+                      name="project_description"
+                      defaultValue={serviceInfo.notes || lead.message || ""}
+                      maxLength={5000}
+                      rows={4}
+                    />
+                  </label>
+                  <div style={{ gridColumn: "1 / -1", marginTop: "8px" }}>
+                    <button className="button button-gold" type="submit">
+                      Convert Lead &amp; Initialize Project Handover
+                    </button>
+                  </div>
+                </form>
+              </div>
+            ) : (
+              <div style={{ marginTop: "24px", padding: "16px 20px", border: "1px solid var(--gold)", borderRadius: "12px", background: "color-mix(in srgb, var(--gold-soft) 20%, var(--surface))", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px" }}>
+                <div>
+                  <strong style={{ color: "var(--gold-ink)", fontSize: "14px" }}>Lead Converted to Client Organization</strong>
+                  <p style={{ margin: "4px 0 0", fontSize: "13px", color: "var(--muted)" }}>
+                    This prospect was converted. Client organization, delivery handover project, and audit events are active in Supabase Cloud.
+                  </p>
+                </div>
+                <Link className="button button-gold button-small" href="/admin/clients">
+                  View Organizations
+                </Link>
+              </div>
+            )}
 
             <div style={{ marginTop: "32px", padding: "20px", border: "1px solid var(--line-strong)", borderRadius: "14px", background: "var(--surface-raised)" }}>
               <h3 style={{ fontSize: "16px", margin: "0 0 14px" }}>Update Lead Information &amp; Pipeline Stage</h3>
@@ -387,19 +484,199 @@ export async function WorkspaceContent({
 
   if (kind === "admin" && key === "clients") {
     const supabase = await createClient();
+
+    if (targetId) {
+      const { data: org, error: orgErr } = await supabase
+        .from("organizations")
+        .select("id, name, status, created_at, deleted_at")
+        .eq("id", targetId)
+        .maybeSingle();
+
+      if (orgErr || !org) {
+        return (
+          <div className="workspace-content">
+            <section className="module-panel">
+              <Link className="text-link" href="/admin/clients" style={{ marginBottom: "16px", display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                <ArrowLeft size={14} /> Back to organization directory
+              </Link>
+              <div className="module-alert" role="alert">
+                <strong>Organization not found</strong>
+                <p>The requested client organization could not be located in Supabase Cloud.</p>
+              </div>
+            </section>
+          </div>
+        );
+      }
+
+      const { data: orgProjects } = await supabase
+        .from("tenant_projects")
+        .select("id, name, description, status, progress_pct, target_date, created_at")
+        .eq("organization_id", org.id)
+        .order("created_at", { ascending: false });
+
+      return (
+        <div className="workspace-content">
+          {notice && <Notice state={notice} />}
+          <section className="module-panel">
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px" }}>
+              <Link className="text-link" href="/admin/clients" style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                <ArrowLeft size={14} /> Back to organization directory
+              </Link>
+              <span className="record-status" style={{ fontSize: "12px", textTransform: "uppercase" }}>
+                Status: {org.status}
+              </span>
+            </div>
+
+            <div style={{ marginTop: "20px" }}>
+              <p className="eyebrow">CLIENT ORGANIZATION · SUPABASE CLOUD</p>
+              <h2 style={{ margin: "6px 0 4px" }}>{org.name}</h2>
+              <p style={{ color: "var(--muted)", margin: 0 }}>
+                Provisioned on {new Date(org.created_at).toLocaleDateString()}
+              </p>
+            </div>
+
+            {/* Handover & Delivery Projects Section */}
+            <div style={{ marginTop: "32px", padding: "20px", border: "1px solid var(--line)", borderRadius: "14px", background: "var(--surface)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", flexWrap: "wrap", gap: "8px" }}>
+                <div>
+                  <h3 style={{ fontSize: "16px", margin: 0, display: "flex", alignItems: "center", gap: "8px" }}>
+                    <FolderKanban size={18} style={{ color: "var(--gold)" }} /> Delivery &amp; Handover Projects
+                  </h3>
+                  <p style={{ margin: "4px 0 0", fontSize: "13px", color: "var(--muted)" }}>
+                    Tenant delivery projects connected to this client organization in Supabase Cloud.
+                  </p>
+                </div>
+                <Link className="button button-small button-secondary" href="/admin/projects">
+                  Manage All Projects
+                </Link>
+              </div>
+
+              {!orgProjects || orgProjects.length === 0 ? (
+                <p className="module-empty">No delivery projects created for this organization yet.</p>
+              ) : (
+                <div className="module-table-wrap">
+                  <table className="module-table">
+                    <thead>
+                      <tr>
+                        <th>Project Name</th>
+                        <th>Status</th>
+                        <th>Progress</th>
+                        <th>Target Date</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {orgProjects.map((proj) => (
+                        <tr key={proj.id}>
+                          <td>
+                            <strong>{proj.name}</strong>
+                            {proj.description && (
+                              <small style={{ display: "block", color: "var(--muted)" }}>
+                                {proj.description.length > 80 ? `${proj.description.slice(0, 80)}…` : proj.description}
+                              </small>
+                            )}
+                          </td>
+                          <td>
+                            <span className="record-status" style={{ textTransform: "capitalize" }}>
+                              {proj.status.replace("_", " ")}
+                            </span>
+                          </td>
+                          <td>{proj.progress_pct}%</td>
+                          <td>{proj.target_date ? new Date(proj.target_date).toLocaleDateString() : "—"}</td>
+                          <td>
+                            <Link className="button button-small button-secondary" href={`/admin/projects?id=${proj.id}`}>
+                              Open Project
+                            </Link>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {/* Client Portal Member Onboarding Section */}
+            <div style={{ marginTop: "28px", padding: "20px", border: "1px solid var(--line)", borderRadius: "14px", background: "var(--surface-raised)" }}>
+              <h3 style={{ fontSize: "16px", margin: "0 0 6px", display: "flex", alignItems: "center", gap: "8px" }}>
+                <UserPlus size={18} style={{ color: "var(--gold)" }} /> Onboard Client Member to Portal
+              </h3>
+              <p style={{ fontSize: "13px", color: "var(--muted)", margin: "0 0 16px", lineHeight: "1.6" }}>
+                Dispatches a secure Supabase Auth invitation email allowing client representatives to access their dedicated portal workspace with tenant data isolation.
+              </p>
+
+              <form action={onboardOrganizationMemberAction} className="auth-form lead-create-form">
+                <input type="hidden" name="organization_id" value={org.id} />
+                <label>
+                  Client Representative Email *
+                  <input name="email" type="email" placeholder="client@company.com" required maxLength={320} />
+                </label>
+                <label>
+                  Assigned Portal Role *
+                  <select name="role" defaultValue="client_owner">
+                    <option value="client_owner">Client Owner (Full Tenant Access)</option>
+                    <option value="client_manager">Client Manager (Project Management)</option>
+                    <option value="client_collaborator">Client Collaborator (Tasks &amp; Files)</option>
+                    <option value="client_viewer">Client Viewer (Read Only)</option>
+                  </select>
+                </label>
+                <div style={{ gridColumn: "1 / -1", marginTop: "8px" }}>
+                  <button className="button button-gold" type="submit">
+                    Send Client Portal Invitation
+                  </button>
+                </div>
+              </form>
+
+              <p className="module-note" style={{ marginTop: "14px" }}>
+                If outbound SMTP is pending custom provider configuration in Supabase Cloud, invitations are safely captured in pending state and audited without false delivery claims.
+              </p>
+            </div>
+
+            {/* Organization Settings */}
+            <div style={{ marginTop: "28px", padding: "20px", border: "1px solid var(--line)", borderRadius: "14px", background: "var(--surface)" }}>
+              <h3 style={{ fontSize: "16px", margin: "0 0 14px" }}>Update Organization Lifecycle</h3>
+              <form action={updateOrganizationAction} className="auth-form lead-create-form">
+                <input type="hidden" name="id" value={org.id} />
+                <label>
+                  Organization Name *
+                  <input name="name" defaultValue={org.name} required maxLength={160} />
+                </label>
+                <label>
+                  Lifecycle Status *
+                  <select name="status" defaultValue={org.status}>
+                    {statuses.map((item) => (
+                      <option key={item} value={item}>{item.toUpperCase()}</option>
+                    ))}
+                  </select>
+                </label>
+                <div style={{ gridColumn: "1 / -1", marginTop: "8px" }}>
+                  <button className="button button-secondary" type="submit">Save Organization Changes</button>
+                </div>
+              </form>
+            </div>
+          </section>
+        </div>
+      );
+    }
+
     const { data, error } = await supabase.from("organizations").select("id, name, status, created_at, deleted_at").order("created_at", { ascending: false }).limit(100);
     if (error) return <ConnectionError title="Organizations are unavailable" description="The request failed under the current account's database permissions." />;
     return <div className="workspace-content">{notice && <Notice state={notice} />}
-      <section className="module-panel"><p className="eyebrow">ORGANIZATION DIRECTORY</p><h2>Organizations</h2><p>{data.length} records returned, including suspended and soft-deleted organizations.</p>
+      <section className="module-panel"><p className="eyebrow">ORGANIZATION DIRECTORY</p><h2>Organizations</h2><p>{data.length} records returned, including suspended and soft-deleted organizations. Click any organization to manage handover projects and client portal access.</p>
         <form action={createOrganizationAction} className="auth-form lead-create-form"><label>Organization name<input name="name" required maxLength={160} /></label><button className="button-gold" type="submit">Create organization</button></form>
         {data.length === 0 ? <p className="module-empty">No organizations are registered.</p> : <div className="module-table-wrap"><table className="module-table"><thead><tr><th>Organization</th><th>Lifecycle</th><th>Created</th><th>Manage</th></tr></thead><tbody>{data.map((org) => <tr key={org.id}>
-          <td>{org.name}</td><td>{org.status}</td><td>{new Date(org.created_at).toLocaleDateString()}</td>
-          <td><details><summary>Edit</summary><form action={updateOrganizationAction} className="row-edit-form">
-            <input type="hidden" name="id" value={org.id} />
-            <label>Name<input name="name" defaultValue={org.name} required maxLength={160} /></label>
-            <label>Lifecycle<select name="status" defaultValue={org.status}>{statuses.map((item) => <option key={item}>{item}</option>)}</select></label>
-            <button className="button-secondary" type="submit">Save changes</button>
-          </form></details></td>
+          <td><Link href={`/admin/clients?id=${org.id}`} style={{ color: "inherit", textDecoration: "none" }}><strong style={{ color: "var(--foreground)" }}>{org.name}</strong></Link></td>
+          <td><span className="record-status">{org.status}</span></td>
+          <td>{new Date(org.created_at).toLocaleDateString()}</td>
+          <td><div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+            <Link className="button button-small button-secondary" href={`/admin/clients?id=${org.id}`}>Open</Link>
+            <details><summary style={{ cursor: "pointer", fontSize: "12px", color: "var(--muted)" }}>Edit</summary><form action={updateOrganizationAction} className="row-edit-form">
+              <input type="hidden" name="id" value={org.id} />
+              <label>Name<input name="name" defaultValue={org.name} required maxLength={160} /></label>
+              <label>Lifecycle<select name="status" defaultValue={org.status}>{statuses.map((item) => <option key={item}>{item}</option>)}</select></label>
+              <button className="button-secondary" type="submit">Save changes</button>
+            </form></details>
+          </div></td>
         </tr>)}</tbody></table></div>}
         <p className="module-note">Deleting is a reversible lifecycle status change; organization and audit data remain in place.</p>
       </section></div>;
@@ -1073,10 +1350,20 @@ function Notice({ state }: { state: string }) {
   const copy: Record<string, string> = {
     created: "Record created.",
     updated: "Changes saved.",
+    deleted: "Record permanently removed.",
+    converted: "Lead converted to Client Organization. Delivery Handover Project initialized in Supabase Cloud.",
+    invited: "Client portal invitation dispatched and recorded in audit log.",
+    smtp_pending: "Client organization & project created. Portal invitation recorded in pending state (Note: custom SMTP provider is not yet configured in Supabase Cloud, so email dispatch was deferred).",
     invalid: "Please check the submitted fields and try again.",
     save: "The database rejected this change. Check the current role, MFA level, and field values.",
+    not_found: "Requested record could not be found.",
   };
-  return <p className={state === "invalid" || state === "save" ? "module-alert" : "module-success"} role="status">{copy[state] ?? "Request completed."}</p>;
+  const isAlert = state === "invalid" || state === "save" || state === "not_found";
+  return (
+    <p className={isAlert ? "module-alert" : "module-success"} role="status">
+      {copy[state] ?? "Request completed."}
+    </p>
+  );
 }
 
 function ConnectionError({ title, description }: { title: string; description: string }) {
