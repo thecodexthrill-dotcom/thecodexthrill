@@ -14,6 +14,13 @@ import {
   type InvoiceLineItem,
   type InvoicePaymentRecord,
 } from "@/lib/supabase/delivery-operations-helper";
+import { normalizeNotificationPreferences } from "@/lib/supabase/notification-helper";
+import {
+  dispatchOrganizationClientNotifications,
+  dispatchPlatformStaffNotifications,
+  dispatchUserNotification,
+} from "@/lib/supabase/notification-service";
+import { runWorkflowAutomationSweep } from "@/lib/supabase/workflow-automation";
 
 async function syncProjectTaskProgress(projectId: string) {
   try {
@@ -43,36 +50,17 @@ async function notifyOrganizationClients(params: {
   excludeUserId: string;
   title: string;
   message: string;
-  type: "project" | "billing" | "system" | "security";
+  type: "project" | "billing" | "system" | "security" | "ticket";
   linkUrl: string;
 }) {
-  try {
-    const adminSupabase = createAdminClient();
-    const { data: members } = await adminSupabase
-      .from("organization_memberships")
-      .select("user_id")
-      .eq("organization_id", params.organizationId)
-      .eq("status", "active");
-
-    if (!members || members.length === 0) return;
-
-    const rows = members
-      .filter((m) => m.user_id && m.user_id !== params.excludeUserId)
-      .map((m) => ({
-        user_id: m.user_id,
-        title: params.title,
-        message: params.message.slice(0, 240),
-        type: params.type,
-        link_url: params.linkUrl,
-        is_read: false,
-      }));
-
-    if (rows.length > 0) {
-      await adminSupabase.from("user_notifications").insert(rows);
-    }
-  } catch {
-    // Notification dispatch is non-blocking
-  }
+  await dispatchOrganizationClientNotifications({
+    organizationId: params.organizationId,
+    excludeUserId: params.excludeUserId,
+    title: params.title,
+    message: params.message,
+    type: params.type,
+    linkUrl: params.linkUrl,
+  });
 }
 
 // ============================================================================
@@ -139,8 +127,21 @@ export async function createSupportTicketAction(formData: FormData) {
     message: parsed.data.message,
   });
 
+  if (!isAdmin) {
+    await dispatchPlatformStaffNotifications({
+      title: `New Support Ticket #${ticketNumber}`,
+      message: `${parsed.data.title} (${parsed.data.priority.toUpperCase()} priority • ${parsed.data.category.replace("_", " ")}).`,
+      type: "ticket",
+      linkUrl: "/admin/support",
+      roles: ["super_admin", "platform_admin", "operations_admin", "support_admin"],
+      excludeUserId: user.id,
+      eventKey: `ticket.created.${ticket.id}`,
+    });
+  }
+
   revalidatePath("/portal/support");
   revalidatePath("/admin/support");
+  revalidatePath("/admin/notifications");
   redirect(`${returnPath}?created=1`);
 }
 
@@ -169,7 +170,7 @@ export async function addTicketMessageAction(formData: FormData) {
   const isStaff = Boolean(
     superAdmin.data ||
     platformRoles.data?.some((r) =>
-      ["super_admin", "platform_admin", "developer", "support_staff"].includes(r.role)
+      ["super_admin", "platform_admin", "operations_admin", "support_admin", "developer", "support_staff"].includes(r.role)
     )
   );
 
@@ -215,30 +216,39 @@ export async function addTicketMessageAction(formData: FormData) {
         .eq("id", ticketId.data);
     }
 
-    // Dispatch real in-app notification to the counterparty
-    try {
-      const adminSupabase = createAdminClient();
-      if (isStaff && ticket.customer_id && ticket.customer_id !== user.id) {
-        await adminSupabase.from("user_notifications").insert({
-          user_id: ticket.customer_id,
-          title: `Response on Support Ticket #${ticket.ticket_number}`,
-          message: message.data.slice(0, 200),
-          type: "ticket",
-          link_url: "/portal/support",
-          is_read: false,
-        });
-      } else if (!isStaff && ticket.assigned_to && ticket.assigned_to !== user.id) {
-        await adminSupabase.from("user_notifications").insert({
-          user_id: ticket.assigned_to,
+    // Dispatch sanitized, deduplicated notification to the counterparty
+    if (isStaff && ticket.customer_id && ticket.customer_id !== user.id) {
+      await dispatchUserNotification({
+        userId: ticket.customer_id,
+        title: `Response on Support Ticket #${ticket.ticket_number}`,
+        message: message.data.slice(0, 200),
+        type: "ticket",
+        linkUrl: "/portal/support",
+        recipientWorkspace: "portal",
+        dedupeWindowMinutes: 1,
+      });
+    } else if (!isStaff) {
+      if (ticket.assigned_to && ticket.assigned_to !== user.id) {
+        await dispatchUserNotification({
+          userId: ticket.assigned_to,
           title: `Client update on Support Ticket #${ticket.ticket_number}`,
           message: message.data.slice(0, 200),
           type: "ticket",
-          link_url: "/admin/support",
-          is_read: false,
+          linkUrl: "/admin/support",
+          recipientWorkspace: "admin",
+          dedupeWindowMinutes: 1,
+        });
+      } else {
+        await dispatchPlatformStaffNotifications({
+          title: `Client reply on Support Ticket #${ticket.ticket_number}`,
+          message: message.data.slice(0, 200),
+          type: "ticket",
+          linkUrl: "/admin/support",
+          roles: ["super_admin", "platform_admin", "operations_admin", "support_admin"],
+          excludeUserId: user.id,
+          dedupeWindowMinutes: 2,
         });
       }
-    } catch {
-      // Notification dispatch is non-blocking to core thread reply
     }
   }
 
@@ -250,8 +260,10 @@ export async function addTicketMessageAction(formData: FormData) {
 }
 
 export async function updateTicketStatusAction(formData: FormData) {
-  const { roles } = await requireWorkspace("admin", ["support"]);
-  const canManage = roles.some((r) => r === "super_admin" || r === "platform_admin" || r === "support_staff");
+  const { user, roles } = await requireWorkspace("admin", ["support"]);
+  const canManage = roles.some((r) =>
+    ["super_admin", "platform_admin", "operations_admin", "support_admin", "support_staff"].includes(r)
+  );
   if (!canManage) redirect("/access-denied");
 
   const ticketId = z.string().uuid().safeParse(formData.get("ticket_id"));
@@ -263,6 +275,12 @@ export async function updateTicketStatusAction(formData: FormData) {
   }
 
   const supabase = await createClient();
+  const { data: existingTicket } = await supabase
+    .from("support_tickets")
+    .select("ticket_number, title, customer_id, status")
+    .eq("id", ticketId.data)
+    .single();
+
   const updateData: Record<string, unknown> = {
     status: status.data,
     updated_at: new Date().toISOString(),
@@ -287,8 +305,26 @@ export async function updateTicketStatusAction(formData: FormData) {
     redirect("/admin/support?error=save");
   }
 
+  if (
+    existingTicket &&
+    existingTicket.customer_id &&
+    existingTicket.customer_id !== user.id &&
+    existingTicket.status !== status.data
+  ) {
+    await dispatchUserNotification({
+      userId: existingTicket.customer_id,
+      title: `Support Ticket #${existingTicket.ticket_number} Updated`,
+      message: `Ticket "${existingTicket.title}" status is now ${status.data.replace("_", " ")}.`,
+      type: "ticket",
+      linkUrl: "/portal/support",
+      recipientWorkspace: "portal",
+      dedupeWindowMinutes: 5,
+    });
+  }
+
   revalidatePath("/admin/support");
   revalidatePath("/portal/support");
+  revalidatePath("/portal/notifications");
   redirect("/admin/support?updated=1");
 }
 
@@ -461,9 +497,9 @@ const taskSchema = z.object({
 export async function createTaskAction(formData: FormData) {
   const isPortal = formData.get("return_path") === "portal";
   const returnPath = isPortal ? "/portal/tasks" : "/admin/tasks";
-  const { roles } = await requireWorkspace(isPortal ? "portal" : "admin", ["tasks"]);
+  const { user, roles } = await requireWorkspace(isPortal ? "portal" : "admin", ["tasks"]);
   const isStaff = !isPortal && roles.some((r) =>
-    ["super_admin", "platform_admin", "developer", "support_staff"].includes(r)
+    ["super_admin", "platform_admin", "operations_admin", "developer", "support_staff"].includes(r)
   );
 
   const parsed = taskSchema.safeParse(Object.fromEntries(formData));
@@ -475,7 +511,7 @@ export async function createTaskAction(formData: FormData) {
   const supabase = await createClient();
   const { data: project } = await supabase
     .from("tenant_projects")
-    .select("organization_id")
+    .select("organization_id, name")
     .eq("id", parsed.data.project_id)
     .single();
 
@@ -490,6 +526,8 @@ export async function createTaskAction(formData: FormData) {
     internalNotes: isStaff ? (parsed.data.internal_notes || parsedDesc.internalNotes) : null,
   });
 
+  const assigneeId = isStaff && parsed.data.assigned_to ? parsed.data.assigned_to : null;
+
   const { error } = await supabase.from("tenant_tasks").insert({
     title: parsed.data.title,
     description: formattedDescription,
@@ -497,7 +535,7 @@ export async function createTaskAction(formData: FormData) {
     organization_id: project.organization_id,
     status: parsed.data.status,
     priority: parsed.data.priority,
-    assigned_to: isStaff && parsed.data.assigned_to ? parsed.data.assigned_to : null,
+    assigned_to: assigneeId,
     due_date: parsed.data.due_date ? parsed.data.due_date : null,
   });
 
@@ -506,6 +544,18 @@ export async function createTaskAction(formData: FormData) {
   }
 
   await syncProjectTaskProgress(parsed.data.project_id);
+
+  if (assigneeId && assigneeId !== user.id) {
+    await dispatchUserNotification({
+      userId: assigneeId,
+      title: `Task Assigned: ${parsed.data.title}`,
+      message: `You were assigned "${parsed.data.title}" (${parsed.data.priority.toUpperCase()} priority${parsed.data.due_date ? ` • Due ${parsed.data.due_date}` : ""}) on ${project.name}.`,
+      type: "project",
+      linkUrl: "/admin/tasks",
+      recipientWorkspace: "admin",
+      dedupeWindowMinutes: 5,
+    });
+  }
 
   revalidatePath("/admin/tasks");
   revalidatePath("/portal/tasks");
@@ -558,9 +608,9 @@ export async function updateTaskStatusAction(formData: FormData) {
 export async function updateTaskAction(formData: FormData) {
   const isPortal = formData.get("return_path") === "portal";
   const returnPath = isPortal ? "/portal/tasks" : "/admin/tasks";
-  const { roles } = await requireWorkspace(isPortal ? "portal" : "admin", ["tasks"]);
+  const { user, roles } = await requireWorkspace(isPortal ? "portal" : "admin", ["tasks"]);
   const isStaff = !isPortal && roles.some((r) =>
-    ["super_admin", "platform_admin", "developer", "support_staff"].includes(r)
+    ["super_admin", "platform_admin", "operations_admin", "developer", "support_staff"].includes(r)
   );
 
   const taskId = z.string().uuid().safeParse(formData.get("id"));
@@ -616,8 +666,10 @@ export async function updateTaskAction(formData: FormData) {
     updated_at: new Date().toISOString(),
   };
 
+  let newAssignee: string | null = existingTask.assigned_to;
   if (isStaff && formData.has("assigned_to")) {
-    updatePayload.assigned_to = parsed.data.assigned_to ? parsed.data.assigned_to : null;
+    newAssignee = parsed.data.assigned_to ? parsed.data.assigned_to : null;
+    updatePayload.assigned_to = newAssignee;
   }
 
   const { error } = await supabase
@@ -631,6 +683,23 @@ export async function updateTaskAction(formData: FormData) {
 
   if (existingTask.project_id) {
     await syncProjectTaskProgress(existingTask.project_id);
+  }
+
+  if (
+    isStaff &&
+    newAssignee &&
+    newAssignee !== existingTask.assigned_to &&
+    newAssignee !== user.id
+  ) {
+    await dispatchUserNotification({
+      userId: newAssignee,
+      title: `Task Assigned: ${parsed.data.title}`,
+      message: `Work item "${parsed.data.title}" (${parsed.data.priority.toUpperCase()} priority${parsed.data.due_date ? ` • Due ${parsed.data.due_date}` : ""}) has been assigned to you.`,
+      type: "project",
+      linkUrl: "/admin/tasks",
+      recipientWorkspace: "admin",
+      dedupeWindowMinutes: 5,
+    });
   }
 
   revalidatePath("/admin/tasks");
@@ -940,7 +1009,7 @@ export async function createInvoiceAction(formData: FormData) {
 }
 
 export async function updateInvoiceStatusAction(formData: FormData) {
-  const { roles } = await requireWorkspace("admin", ["billing"]);
+  const { user, roles } = await requireWorkspace("admin", ["billing"]);
   const canManage = roles.some((r) => r === "super_admin" || r === "platform_admin");
   if (!canManage) redirect("/access-denied");
 
@@ -954,7 +1023,7 @@ export async function updateInvoiceStatusAction(formData: FormData) {
   const supabase = await createClient();
   const { data: existingInvoice } = await supabase
     .from("tenant_invoices")
-    .select("id, amount_cents, items")
+    .select("id, organization_id, invoice_number, amount_cents, status, due_date, items")
     .eq("id", id.data)
     .single();
 
@@ -984,6 +1053,27 @@ export async function updateInvoiceStatusAction(formData: FormData) {
   const { error } = await supabase.from("tenant_invoices").update(updateData).eq("id", id.data);
   if (error) {
     redirect("/admin/billing?error=save");
+  }
+
+  if (
+    existingInvoice.status !== status.data &&
+    (status.data === "sent" || status.data === "overdue")
+  ) {
+    const amountFormatted = `$${(existingInvoice.amount_cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2 })}`;
+    await notifyOrganizationClients({
+      organizationId: existingInvoice.organization_id,
+      excludeUserId: user.id,
+      title:
+        status.data === "overdue"
+          ? `Payment Past Due: Invoice ${existingInvoice.invoice_number}`
+          : `Invoice Issued: ${existingInvoice.invoice_number}`,
+      message:
+        status.data === "overdue"
+          ? `Invoice ${existingInvoice.invoice_number} (${amountFormatted}) is now marked past due.`
+          : `Invoice ${existingInvoice.invoice_number} for ${amountFormatted} has been issued to your billing portal.`,
+      type: "billing",
+      linkUrl: "/portal/invoices",
+    });
   }
 
   revalidatePath("/admin/billing");
@@ -1131,7 +1221,7 @@ export async function deleteInvoiceAction(formData: FormData) {
 }
 
 // ============================================================================
-// 5. Notifications
+// 5. Notifications, Preferences & Workflow Automation
 // ============================================================================
 
 export async function markNotificationReadAction(formData: FormData) {
@@ -1143,13 +1233,19 @@ export async function markNotificationReadAction(formData: FormData) {
   }
 
   const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
   await supabase
     .from("user_notifications")
     .update({ is_read: true })
-    .eq("id", notificationId.data);
+    .eq("id", notificationId.data)
+    .eq("user_id", user.id);
 
   revalidatePath("/portal/notifications");
   revalidatePath("/admin/notifications");
+  revalidatePath("/portal");
+  revalidatePath("/admin");
   redirect(`${returnPath}?notice=read`);
 }
 
@@ -1167,7 +1263,82 @@ export async function markAllNotificationsReadAction(formData: FormData) {
 
   revalidatePath("/portal/notifications");
   revalidatePath("/admin/notifications");
+  revalidatePath("/portal");
+  revalidatePath("/admin");
   redirect(`${returnPath}?notice=all_read`);
+}
+
+export async function updateNotificationPreferencesAction(formData: FormData) {
+  const isPortal = formData.get("return_path") === "portal";
+  const returnPath = isPortal ? "/portal/notifications" : "/admin/notifications";
+  const { user } = await requireWorkspace(isPortal ? "portal" : "admin", ["notifications"]);
+
+  const nextPreferences = normalizeNotificationPreferences({
+    security: true,
+    system: formData.get("pref_system") === "on",
+    project: formData.get("pref_project") === "on",
+    billing: formData.get("pref_billing") === "on",
+    ticket: formData.get("pref_ticket") === "on",
+    email_enabled: formData.get("pref_email_enabled") === "on",
+    updated_at: new Date().toISOString(),
+  });
+
+  try {
+    const adminSupabase = createAdminClient();
+    const { data: existingUser } = await adminSupabase.auth.admin.getUserById(user.id);
+    const currentMetadata = existingUser?.user?.user_metadata ?? user.user_metadata ?? {};
+
+    await adminSupabase.auth.admin.updateUserById(user.id, {
+      user_metadata: {
+        ...currentMetadata,
+        notification_preferences: nextPreferences,
+      },
+    });
+
+    const supabase = await createClient();
+    await supabase.auth.updateUser({
+      data: {
+        notification_preferences: nextPreferences,
+      },
+    });
+
+    await adminSupabase.from("audit_events").insert({
+      actor_user_id: user.id,
+      scope: "platform",
+      action: "user.notification_preferences_updated",
+      target_type: "profiles",
+      target_id: user.id,
+      details: {
+        preferences: nextPreferences,
+      },
+    });
+  } catch {
+    redirect(`${returnPath}?error=preferences`);
+  }
+
+  revalidatePath("/portal/notifications");
+  revalidatePath("/admin/notifications");
+  redirect(`${returnPath}?notice=preferences_saved`);
+}
+
+export async function runWorkflowAutomationAction() {
+  const { user, roles } = await requireWorkspace("admin", ["notifications"]);
+  const canRun = roles.some((r) =>
+    ["super_admin", "platform_admin", "operations_admin"].includes(r)
+  );
+  if (!canRun) redirect("/access-denied");
+
+  const summary = await runWorkflowAutomationSweep({
+    triggeredBy: "admin_manual",
+    actorUserId: user.id,
+  });
+
+  revalidatePath("/admin/notifications");
+  revalidatePath("/portal/notifications");
+  revalidatePath("/admin");
+  redirect(
+    `/admin/notifications?notice=automation_completed&candidates=${summary.evaluatedCounts.totalCandidates}&inserted=${summary.dispatchSummary.inserted}&suppressed=${summary.dispatchSummary.duplicatesSuppressed}`,
+  );
 }
 
 // ============================================================================

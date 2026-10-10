@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireWorkspace } from "@/lib/supabase/access";
 import { extractLeadService } from "@/lib/supabase/lead-service-helper";
+import { dispatchPlatformStaffNotifications } from "@/lib/supabase/notification-service";
 
 const managerRoles = ["super_admin", "platform_admin"] as const;
 const leadSchema = z.object({
@@ -243,6 +244,15 @@ export async function convertLeadToClientAction(formData: FormData) {
   revalidatePath("/admin/leads");
   revalidatePath("/admin/clients");
   revalidatePath("/admin/projects");
+  revalidatePath("/admin/notifications");
+
+  await dispatchPlatformStaffNotifications({
+    title: `Lead Converted to Client: ${newOrg.name}`,
+    message: `Organization "${newOrg.name}" and handover project initialized (${onboardingStatus === "invited" ? "Auth invite sent" : "SMTP pending manual invite"}).`,
+    type: "system",
+    linkUrl: `/admin/clients?id=${newOrg.id}`,
+    dedupeWindowMinutes: 5,
+  });
 
   const noticeParam = onboardingStatus === "smtp_pending" ? "&notice=smtp_pending" : "";
   redirect(`/admin/clients?id=${newOrg.id}&converted=1${noticeParam}`);
@@ -294,7 +304,16 @@ export async function onboardOrganizationMemberAction(formData: FormData) {
     console.warn("[onboardMember] Audit log warning:", err);
   }
 
+  await dispatchPlatformStaffNotifications({
+    title: `Client Portal Invitation: ${parsed.data.email}`,
+    message: `Invitation for ${parsed.data.email} (${parsed.data.role.replace("_", " ")}) recorded with status: ${onboardingStatus === "invited" ? "accepted by Auth SMTP" : "pending custom SMTP"}.`,
+    type: "system",
+    linkUrl: `/admin/clients?id=${parsed.data.organization_id}`,
+    dedupeWindowMinutes: 5,
+  });
+
   revalidatePath("/admin/clients");
+  revalidatePath("/admin/notifications");
   const noticeParam = onboardingStatus === "smtp_pending" ? "&notice=smtp_pending" : "";
   redirect(`/admin/clients?id=${parsed.data.organization_id}&invited=1${noticeParam}`);
 }

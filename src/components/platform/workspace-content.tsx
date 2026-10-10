@@ -59,9 +59,11 @@ import {
   type InvoiceRecord,
 } from "@/components/platform/billing-manager";
 import {
-  markNotificationReadAction,
-  markAllNotificationsReadAction,
-} from "@/lib/supabase/operations-actions";
+  NotificationCenter,
+  type NotificationItemRecord,
+} from "@/components/platform/notification-center";
+import { normalizeNotificationPreferences } from "@/lib/supabase/notification-helper";
+import { getTransactionalEmailConfigStatus } from "@/lib/supabase/transactional-email";
 import {
   AnalyticsDashboard,
   type AnalyticsData,
@@ -1043,172 +1045,50 @@ export async function WorkspaceContent({
 
   if (key === "notifications") {
     const supabase = await createClient();
-    const [{ data: { user } }, { data: assurance }, notifsResult] = await Promise.all([
+    const [{ data: { user } }, { data: assurance }] = await Promise.all([
       supabase.auth.getUser(),
       supabase.auth.mfa.getAuthenticatorAssuranceLevel(),
-      supabase.from("user_notifications").select("*").order("created_at", { ascending: false }).limit(50),
     ]);
 
-    const notifications = (notifsResult.data ?? []) as {
-      id: string;
-      user_id: string;
-      title: string;
-      message: string;
-      type: "system" | "security" | "ticket" | "project" | "billing";
-      link_url: string | null;
-      is_read: boolean;
-      created_at: string;
-    }[];
-    const queryError = notifsResult.error?.message;
-    const unreadCount = notifications.filter((n) => !n.is_read).length;
+    const notifsResult = user
+      ? await supabase
+          .from("user_notifications")
+          .select("*")
+          .eq("user_id", user.id)
+          .order("created_at", { ascending: false })
+          .limit(100)
+      : { data: [], error: null };
+
+    const notifications = (notifsResult.data ?? []) as NotificationItemRecord[];
+    const preferences = normalizeNotificationPreferences(
+      user?.user_metadata?.notification_preferences,
+    );
+    const emailConfig = getTransactionalEmailConfigStatus();
+    const configuredCronSecret =
+      process.env.CRON_SECRET?.trim() ||
+      process.env.WORKFLOW_AUTOMATION_SECRET?.trim() ||
+      "";
+    const schedulerConfigured = configuredCronSecret.length >= 16;
+    const canRunAutomation =
+      kind === "admin" &&
+      roles.some((r) =>
+        ["super_admin", "platform_admin", "operations_admin"].includes(r),
+      );
 
     return (
-      <div className="workspace-content">
-        <section className="module-panel">
-          {queryError && (
-            <div
-              role="alert"
-              style={{
-                color: "#ef4444",
-                background: "rgba(239, 68, 68, 0.1)",
-                padding: "12px 16px",
-                borderRadius: "6px",
-                border: "1px solid rgba(239, 68, 68, 0.25)",
-                fontSize: "14px",
-                marginBottom: "16px",
-              }}
-            >
-              <strong>Data Notice:</strong> Unable to load live notifications from database ({queryError}).
-            </div>
-          )}
-
-          {notice && (
-            <p className="module-success" role="status" style={{ marginBottom: "16px" }}>
-              {notice === "all_read"
-                ? "All notifications marked as read."
-                : notice === "read"
-                ? "Notification marked as read."
-                : "Notifications updated."}
-            </p>
-          )}
-
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px" }}>
-            <div>
-              <p className="eyebrow" style={{ margin: 0 }}>SECURITY &amp; SYSTEM FEEDS</p>
-              <h2 style={{ margin: "4px 0" }}>Notifications</h2>
-              <p style={{ margin: 0, color: "var(--muted)", fontSize: "14px" }}>
-                Real-time system events, account security notices, and workspace activity.
-              </p>
-            </div>
-
-            {unreadCount > 0 && (
-              <form action={markAllNotificationsReadAction}>
-                <input type="hidden" name="return_path" value={kind} />
-                <button
-                  type="submit"
-                  className="button button-secondary"
-                  style={{ fontSize: "12px", padding: "6px 12px" }}
-                >
-                  Mark all as read ({unreadCount})
-                </button>
-              </form>
-            )}
-          </div>
-
-          <div style={{ display: "grid", gap: "12px", marginTop: "20px" }}>
-            {notifications.length > 0 ? (
-              notifications.map((n) => {
-                const typeColors: Record<string, { bg: string; text: string; border: string }> = {
-                  security: { bg: "rgba(239, 68, 68, 0.1)", text: "#ef4444", border: "rgba(239, 68, 68, 0.2)" },
-                  ticket: { bg: "rgba(59, 130, 246, 0.1)", text: "#3b82f6", border: "rgba(59, 130, 246, 0.2)" },
-                  billing: { bg: "rgba(212, 175, 55, 0.1)", text: "var(--gold)", border: "rgba(212, 175, 55, 0.25)" },
-                  project: { bg: "rgba(34, 197, 94, 0.1)", text: "#22c55e", border: "rgba(34, 197, 94, 0.2)" },
-                  system: { bg: "rgba(255, 255, 255, 0.05)", text: "var(--muted)", border: "var(--border)" },
-                };
-                const tag = typeColors[n.type] ?? typeColors.system;
-
-                return (
-                  <div key={n.id} className="activity-row" style={{ opacity: n.is_read ? 0.7 : 1, display: "flex", gap: "12px", alignItems: "flex-start" }}>
-                    <span className="activity-dot" style={{ background: n.is_read ? "var(--muted)" : "var(--gold)", marginTop: "6px" }} />
-                    <div style={{ flex: 1 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                          <span
-                            style={{
-                              fontSize: "10px",
-                              textTransform: "uppercase",
-                              padding: "2px 6px",
-                              borderRadius: "3px",
-                              background: tag.bg,
-                              color: tag.text,
-                              border: `1px solid ${tag.border}`,
-                              fontWeight: 600,
-                            }}
-                          >
-                            {n.type}
-                          </span>
-                          <strong>{n.title}</strong>
-                        </div>
-                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                          {n.link_url && (
-                            <Link
-                              href={n.link_url}
-                              className="button button-secondary"
-                              style={{ padding: "2px 8px", fontSize: "11px", textDecoration: "none" }}
-                            >
-                              View &rarr;
-                            </Link>
-                          )}
-                          {!n.is_read && (
-                            <form action={markNotificationReadAction} style={{ display: "inline" }}>
-                              <input type="hidden" name="id" value={n.id} />
-                              <input type="hidden" name="return_path" value={kind} />
-                              <button type="submit" className="button button-secondary" style={{ padding: "2px 8px", fontSize: "11px" }}>
-                                Mark read
-                              </button>
-                            </form>
-                          )}
-                        </div>
-                      </div>
-                      <p style={{ margin: "4px 0" }}>{n.message}</p>
-                      <small style={{ color: "var(--muted)", fontSize: "11px" }}>{new Date(n.created_at).toLocaleString()}</small>
-                    </div>
-                  </div>
-                );
-              })
-            ) : (
-              <p className="module-empty" style={{ margin: "10px 0" }}>
-                No active notifications recorded for this account.
-              </p>
-            )}
-
-            <div className="activity-row">
-              <span className="activity-dot" />
-              <div>
-                <strong>Multi-Factor Authentication Status</strong>
-                <p>{assurance?.currentLevel === "aal2" ? "Your session is verified with AAL2 MFA protection." : "Enhance your account security by registering a TOTP authenticator device."}</p>
-                <small>{new Date().toLocaleDateString()}</small>
-              </div>
-            </div>
-            <div className="activity-row">
-              <span className="activity-dot" />
-              <div>
-                <strong>Authenticated Workspace Session</strong>
-                <p>Signed in as {user?.email} with roles: {roles.map((r) => r.replaceAll("_", " ")).join(", ")}.</p>
-                <small>{new Date().toLocaleDateString()}</small>
-              </div>
-            </div>
-            <div className="activity-row">
-              <span className="activity-dot" />
-              <div>
-                <strong>Supabase Cloud Protection</strong>
-                <p>All workspace queries are safeguarded by database Row-Level Security.</p>
-                <small>{new Date().toLocaleDateString()}</small>
-              </div>
-            </div>
-          </div>
-        </section>
-      </div>
+      <NotificationCenter
+        kind={kind}
+        notifications={notifications}
+        preferences={preferences}
+        emailConfig={emailConfig}
+        schedulerConfigured={schedulerConfigured}
+        canRunAutomation={canRunAutomation}
+        userEmail={user?.email ?? "Account"}
+        roles={roles}
+        assuranceLevel={assurance?.currentLevel ?? null}
+        notice={notice}
+        queryError={notifsResult.error?.message}
+      />
     );
   }
 

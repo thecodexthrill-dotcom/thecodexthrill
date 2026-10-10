@@ -83,12 +83,14 @@ export function PlatformShell({
   section = [],
   roles,
   userEmail,
+  unreadNotificationsCount = 0,
   children,
 }: {
   kind: "admin" | "portal";
   section?: string[];
   roles: WorkspaceRole[];
   userEmail: string;
+  unreadNotificationsCount?: number;
   children: ReactNode;
 }) {
   const pathname = usePathname();
@@ -112,12 +114,85 @@ export function PlatformShell({
       <aside aria-label={client ? "Client portal navigation" : "Admin navigation"} className={`platform-sidebar ${menuOpen ? "is-open" : ""}`}>
         <div className="sidebar-brand-row"><Brand /><button aria-label="Close navigation" className="sidebar-close" onClick={() => setMenuOpen(false)} type="button"><X size={19} /></button></div>
         <p className="sidebar-caption">{client ? "ORGANIZATION SPACE" : "PLATFORM"}</p>
-        <nav className="platform-nav">{filteredNavigation.map(({ href, label, icon: Icon }) => { const selected = pathname === href || (href !== "/admin" && href !== "/portal" && pathname.startsWith(`${href}/`)); return <Link aria-current={selected ? "page" : undefined} className={`platform-nav-link ${selected ? "is-active" : ""}`} href={href} key={href} onClick={() => setMenuOpen(false)}><Icon aria-hidden="true" size={17} /><span>{label}</span></Link>; })}{filteredNavigation.length === 0 && <p className="sidebar-no-results">No matching pages.</p>}</nav>
+        <nav className="platform-nav">
+          {filteredNavigation.map(({ href, label, icon: Icon }) => {
+            const selected = pathname === href || (href !== "/admin" && href !== "/portal" && pathname.startsWith(`${href}/`));
+            const isNotificationsItem = href.endsWith("/notifications");
+            return (
+              <Link
+                aria-current={selected ? "page" : undefined}
+                className={`platform-nav-link ${selected ? "is-active" : ""}`}
+                href={href}
+                key={href}
+                onClick={() => setMenuOpen(false)}
+              >
+                <Icon aria-hidden="true" size={17} />
+                <span style={{ flex: 1 }}>{label}</span>
+                {isNotificationsItem && unreadNotificationsCount > 0 && (
+                  <span
+                    style={{
+                      background: "var(--gold)",
+                      color: "#000",
+                      fontSize: "10px",
+                      fontWeight: 700,
+                      padding: "1px 6px",
+                      borderRadius: "999px",
+                      lineHeight: 1.4,
+                    }}
+                  >
+                    {unreadNotificationsCount > 99 ? "99+" : unreadNotificationsCount}
+                  </span>
+                )}
+              </Link>
+            );
+          })}
+          {filteredNavigation.length === 0 && <p className="sidebar-no-results">No matching pages.</p>}
+        </nav>
         <div className="sidebar-footer"><span className="connection-dot" /> Authenticated session</div>
       </aside>
       {menuOpen && <button aria-label="Close navigation menu" className="sidebar-scrim" onClick={() => setMenuOpen(false)} type="button" />}
       <div className="platform-main">
-        <header className="platform-topbar"><button aria-label="Open navigation" aria-expanded={menuOpen} className="menu-trigger" onClick={() => setMenuOpen(true)} type="button"><Menu size={20} /></button><Brand /><label className="platform-search"><Search aria-hidden="true" size={17} /><span className="sr-only">Search workspace navigation</span><input onChange={(event) => setQuery(event.target.value)} placeholder="Search workspace..." value={query} /></label><div className="platform-top-actions"><ThemeToggle />{navigation.some((item) => item.href.endsWith("notifications")) && <Link aria-label="Notifications" className="icon-action" href={client ? "/portal/notifications" : "/admin/notifications"}><Bell size={18} /></Link>}<details className="profile-menu"><summary><span className="profile-avatar">{userEmail.slice(0, 1).toUpperCase()}</span><span className="profile-label"><strong>{userEmail}</strong><small>{primaryRole ? roleLabel(primaryRole) : "Account"}</small></span><ChevronDown aria-hidden="true" size={15} /></summary><div className="profile-dropdown"><p>{roles.map(roleLabel).join(", ")}</p><Link href="/">Visit public site</Link><form action={signOutAction}><button className="profile-signout" type="submit">Sign out</button></form></div></details></div></header>
+        <header className="platform-topbar">
+          <button aria-label="Open navigation" aria-expanded={menuOpen} className="menu-trigger" onClick={() => setMenuOpen(true)} type="button"><Menu size={20} /></button>
+          <Brand />
+          <label className="platform-search"><Search aria-hidden="true" size={17} /><span className="sr-only">Search workspace navigation</span><input onChange={(event) => setQuery(event.target.value)} placeholder="Search workspace..." value={query} /></label>
+          <div className="platform-top-actions">
+            <ThemeToggle />
+            {navigation.some((item) => item.href.endsWith("notifications")) && (
+              <Link
+                aria-label={unreadNotificationsCount > 0 ? `Notifications (${unreadNotificationsCount} unread)` : "Notifications"}
+                className="icon-action"
+                href={client ? "/portal/notifications" : "/admin/notifications"}
+                style={{ position: "relative" }}
+              >
+                <Bell size={18} />
+                {unreadNotificationsCount > 0 && (
+                  <span
+                    style={{
+                      position: "absolute",
+                      top: "-3px",
+                      right: "-3px",
+                      background: "var(--gold)",
+                      color: "#000",
+                      fontSize: "9px",
+                      fontWeight: 700,
+                      minWidth: "15px",
+                      height: "15px",
+                      borderRadius: "999px",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      padding: "0 3px",
+                    }}
+                  >
+                    {unreadNotificationsCount > 9 ? "9+" : unreadNotificationsCount}
+                  </span>
+                )}
+              </Link>
+            )}
+            <details className="profile-menu"><summary><span className="profile-avatar">{userEmail.slice(0, 1).toUpperCase()}</span><span className="profile-label"><strong>{userEmail}</strong><small>{primaryRole ? roleLabel(primaryRole) : "Account"}</small></span><ChevronDown aria-hidden="true" size={15} /></summary><div className="profile-dropdown"><p>{roles.map(roleLabel).join(", ")}</p><Link href="/">Visit public site</Link><form action={signOutAction}><button className="profile-signout" type="submit">Sign out</button></form></div></details>
+          </div>
+        </header>
         <main className="platform-page" id="main-content">
           <nav aria-label="Breadcrumb" className="platform-breadcrumb"><Link href={client ? "/portal" : "/admin"}>{client ? "PORTAL" : "ADMIN"}</Link>{currentKey !== "overview" && <><span>/</span><Link href={`${client ? "/portal" : "/admin"}/${currentKey}`}>{active?.title ?? currentKey}</Link></>}{section[1] && <><span>/</span><span>Detail</span></>}</nav>
           {active && <div className="platform-page-heading"><div><p className="eyebrow">{client ? "CLIENT PORTAL" : "ADMIN WORKSPACE"}</p><h1>{active.title}</h1><p>{active.description}</p></div></div>}

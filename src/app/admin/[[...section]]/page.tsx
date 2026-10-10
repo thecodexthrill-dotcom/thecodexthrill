@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { PlatformShell } from "@/components/platform/platform-shell";
 import { WorkspaceContent } from "@/components/platform/workspace-content";
 import { requireWorkspace } from "@/lib/supabase/access";
+import { createClient } from "@/lib/supabase/server";
 
 export const metadata: Metadata = { title: "Admin workspace", robots: { index: false, follow: false } };
 
@@ -23,6 +24,13 @@ export default async function AdminPage({
 }) {
   const [{ section = [] }, query] = await Promise.all([params, searchParams]);
   const { user, roles } = await requireWorkspace("admin", section);
+  const supabase = await createClient();
+  const { count: unreadCount } = await supabase
+    .from("user_notifications")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", user.id)
+    .eq("is_read", false);
+
   const selectedId = query.id || (section.length > 1 ? section[1] : undefined);
   const noticeState =
     query.notice ||
@@ -39,7 +47,13 @@ export default async function AdminPage({
               : query.error);
 
   return (
-    <PlatformShell kind="admin" section={section} roles={roles} userEmail={user.email ?? "Account"}>
+    <PlatformShell
+      kind="admin"
+      section={section}
+      roles={roles}
+      userEmail={user.email ?? "Account"}
+      unreadNotificationsCount={unreadCount ?? 0}
+    >
       <WorkspaceContent
         kind="admin"
         section={section}

@@ -3,6 +3,7 @@
 import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatLeadMessage } from "@/lib/supabase/lead-service-helper";
+import { dispatchPlatformStaffNotifications } from "@/lib/supabase/notification-service";
 
 export type ContactActionState = {
   error?: string;
@@ -119,6 +120,14 @@ export async function submitContactEnquiryAction(
           "We could not record your enquiry at this moment. Please email us directly at contact@thecodexthrill.com.",
       };
     }
+
+    await dispatchPlatformStaffNotifications({
+      title: `New Website Lead: ${parsed.data.contactName}`,
+      message: `${parsed.data.contactName}${parsed.data.companyName ? ` (${parsed.data.companyName})` : ""} submitted a ${parsed.data.requestedService || "general"} enquiry.`,
+      type: "system",
+      linkUrl: "/admin/leads",
+      dedupeWindowMinutes: 5,
+    });
 
     return {
       message:
