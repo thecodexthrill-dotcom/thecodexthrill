@@ -784,13 +784,14 @@ export async function WorkspaceContent({
       supabase
         .from("support_tickets")
         .select("*, messages:support_ticket_messages(*)")
-        .order("created_at", { ascending: false }),
+        .order("created_at", { ascending: false })
+        .order("created_at", { referencedTable: "support_ticket_messages", ascending: true }),
       kind === "admin"
         ? supabase.from("organizations").select("id, name").eq("status", "active")
         : supabase.from("organization_memberships").select("organization_id, organizations(id, name)").eq("status", "active"),
     ]);
 
-    const tickets = (ticketsResult.data ?? []) as SupportTicketRecord[];
+    const rawTickets = (ticketsResult.data ?? []) as SupportTicketRecord[];
     const orgs = (
       kind === "admin"
         ? (orgsResult.data ?? [])
@@ -799,12 +800,18 @@ export async function WorkspaceContent({
             .filter(Boolean)
     ) as { id: string; name: string }[];
 
+    const userOrgIds = new Set(orgs.map((o) => o.id));
+    const tickets = kind === "admin"
+      ? rawTickets
+      : rawTickets.filter((t) => !t.organization_id || userOrgIds.has(t.organization_id));
+
     return (
       <SupportManager
         tickets={tickets}
         isStaff={kind === "admin"}
         userOrganizations={orgs}
         notice={notice}
+        queryError={ticketsResult.error?.message}
       />
     );
   }

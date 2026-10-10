@@ -19,7 +19,11 @@ const createTicketSchema = z.object({
 });
 
 export async function createSupportTicketAction(formData: FormData) {
-  const { user } = await requireWorkspace("portal", ["support"]);
+  const returnParam = formData.get("return_path");
+  const isAdmin = returnParam === "admin";
+  const { user } = await requireWorkspace(isAdmin ? "admin" : "portal", ["support"]);
+  const returnPath = isAdmin ? "/admin/support" : "/portal/support";
+
   const rawOrgId = formData.get("organization_id");
   const organizationId = typeof rawOrgId === "string" && rawOrgId.trim() ? rawOrgId.trim() : undefined;
 
@@ -32,7 +36,7 @@ export async function createSupportTicketAction(formData: FormData) {
   });
 
   if (!parsed.success) {
-    redirect("/portal/support?error=invalid");
+    redirect(`${returnPath}?error=invalid`);
   }
 
   const supabase = await createClient();
@@ -55,45 +59,92 @@ export async function createSupportTicketAction(formData: FormData) {
     .single();
 
   if (ticketError || !ticket) {
-    redirect("/portal/support?error=save");
+    redirect(`${returnPath}?error=save`);
   }
 
   // Create initial message in the ticket thread
   await supabase.from("support_ticket_messages").insert({
     ticket_id: ticket.id,
     sender_id: user.id,
-    is_staff: false,
+    is_staff: isAdmin,
     message: parsed.data.message,
   });
 
   revalidatePath("/portal/support");
   revalidatePath("/admin/support");
-  redirect("/portal/support?created=1");
+  redirect(`${returnPath}?created=1`);
 }
 
 export async function addTicketMessageAction(formData: FormData) {
   const ticketId = z.string().uuid().safeParse(formData.get("ticket_id"));
   const message = z.string().trim().min(1).max(10000).safeParse(formData.get("message"));
-  const isStaffParam = formData.get("is_staff") === "true";
-  const returnPath = isStaffParam ? "/admin/support" : "/portal/support";
-
-  if (!ticketId.success || !message.success) {
-    redirect(`${returnPath}?error=invalid`);
-  }
 
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
+  // Zero-trust verification of staff status from platform roles
+  const [platformRoles, superAdmin] = await Promise.all([
+    supabase
+      .from("platform_role_assignments")
+      .select("role")
+      .eq("user_id", user.id)
+      .is("revoked_at", null),
+    supabase
+      .from("platform_super_admin_designation")
+      .select("user_id")
+      .eq("user_id", user.id)
+      .maybeSingle(),
+  ]);
+
+  const isStaff = Boolean(
+    superAdmin.data ||
+    platformRoles.data?.some((r) =>
+      ["super_admin", "platform_admin", "developer", "support_staff"].includes(r.role)
+    )
+  );
+
+  const requestedReturnPath = formData.get("return_path");
+  const returnPath = isStaff && requestedReturnPath === "admin"
+    ? "/admin/support"
+    : (isStaff ? "/admin/support" : "/portal/support");
+
+  if (!ticketId.success || !message.success) {
+    redirect(`${returnPath}?error=invalid`);
+  }
+
   const { error } = await supabase.from("support_ticket_messages").insert({
     ticket_id: ticketId.data,
     sender_id: user.id,
-    is_staff: isStaffParam,
+    is_staff: isStaff,
     message: message.data,
   });
 
   if (error) {
     redirect(`${returnPath}?error=save`);
+  }
+
+  // Automatic ticket lifecycle transition
+  const { data: ticket } = await supabase
+    .from("support_tickets")
+    .select("status")
+    .eq("id", ticketId.data)
+    .single();
+
+  if (ticket && ticket.status !== "closed") {
+    let nextStatus: string | null = null;
+    if (isStaff && ticket.status !== "waiting_on_client") {
+      nextStatus = "waiting_on_client";
+    } else if (!isStaff && (ticket.status === "waiting_on_client" || ticket.status === "resolved")) {
+      nextStatus = "in_progress";
+    }
+
+    if (nextStatus) {
+      await supabase
+        .from("support_tickets")
+        .update({ status: nextStatus, updated_at: new Date().toISOString() })
+        .eq("id", ticketId.data);
+    }
   }
 
   revalidatePath("/portal/support");
@@ -117,6 +168,7 @@ export async function updateTicketStatusAction(formData: FormData) {
   const supabase = await createClient();
   const updateData: Record<string, unknown> = {
     status: status.data,
+    updated_at: new Date().toISOString(),
   };
 
   if (priority.success) {
@@ -125,6 +177,8 @@ export async function updateTicketStatusAction(formData: FormData) {
 
   if (status.data === "resolved" || status.data === "closed") {
     updateData.resolved_at = new Date().toISOString();
+  } else {
+    updateData.resolved_at = null;
   }
 
   const { error } = await supabase

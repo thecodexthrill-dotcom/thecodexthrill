@@ -39,9 +39,10 @@ type SupportManagerProps = {
   isStaff: boolean;
   userOrganizations?: { id: string; name: string }[];
   notice?: string;
+  queryError?: string;
 };
 
-export function SupportManager({ tickets, isStaff, userOrganizations = [], notice }: SupportManagerProps) {
+export function SupportManager({ tickets, isStaff, userOrganizations = [], notice, queryError }: SupportManagerProps) {
   const [activeTicketId, setActiveTicketId] = useState<string | null>(tickets[0]?.id ?? null);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -55,9 +56,31 @@ export function SupportManager({ tickets, isStaff, userOrganizations = [], notic
 
   return (
     <div className="workspace-content" style={{ display: "grid", gap: "24px" }}>
+      {queryError && (
+        <div
+          role="alert"
+          style={{
+            color: "#ef4444",
+            background: "rgba(239, 68, 68, 0.1)",
+            padding: "12px 16px",
+            borderRadius: "6px",
+            border: "1px solid rgba(239, 68, 68, 0.25)",
+            fontSize: "14px",
+          }}
+        >
+          <strong>Database Notice:</strong> Unable to load support tickets ({queryError}).
+        </div>
+      )}
+
       {notice && (
         <p className="module-success" role="status">
-          {notice === "created" ? "Support ticket submitted successfully." : "Ticket updated successfully."}
+          {notice === "created"
+            ? "Support ticket submitted successfully."
+            : notice === "message_sent"
+            ? "Response posted to ticket thread."
+            : notice === "deleted"
+            ? "Ticket deleted successfully."
+            : "Ticket updated successfully."}
         </p>
       )}
 
@@ -98,7 +121,19 @@ export function SupportManager({ tickets, isStaff, userOrganizations = [], notic
           </div>
 
           <form action={createSupportTicketAction} className="auth-form" style={{ marginTop: "16px", display: "grid", gap: "14px" }}>
-            {userOrganizations.length > 0 && (
+            <input type="hidden" name="return_path" value={isStaff ? "admin" : "portal"} />
+
+            {isStaff ? (
+              <label>
+                Client Organization
+                <select name="organization_id" defaultValue="">
+                  <option value="">General Support (Internal / No Client Org)</option>
+                  {userOrganizations.map((org) => (
+                    <option key={org.id} value={org.id}>{org.name}</option>
+                  ))}
+                </select>
+              </label>
+            ) : userOrganizations.length > 0 ? (
               <label>
                 Organization
                 <select name="organization_id" defaultValue={userOrganizations[0]?.id}>
@@ -107,7 +142,7 @@ export function SupportManager({ tickets, isStaff, userOrganizations = [], notic
                   ))}
                 </select>
               </label>
-            )}
+            ) : null}
 
             <label>
               Subject / Title
@@ -298,30 +333,32 @@ export function SupportManager({ tickets, isStaff, userOrganizations = [], notic
               {/* Messages Thread */}
               <div style={{ display: "flex", flexDirection: "column", gap: "14px", borderTop: "1px solid var(--border)", paddingTop: "16px" }}>
                 {activeTicket.messages && activeTicket.messages.length > 0 ? (
-                  activeTicket.messages.map((msg) => (
-                    <div
-                      key={msg.id}
-                      style={{
-                        padding: "12px 16px",
-                        borderRadius: "8px",
-                        border: "1px solid var(--border)",
-                        background: msg.is_staff ? "rgba(212, 175, 55, 0.04)" : "rgba(255, 255, 255, 0.02)",
-                        alignSelf: msg.is_staff ? "flex-start" : "stretch",
-                      }}
-                    >
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
-                        <span style={{ fontSize: "12px", fontWeight: 600, color: msg.is_staff ? "var(--gold)" : "inherit" }}>
-                          {msg.is_staff ? "TheCodexThrill Engineering" : "Client Message"}
-                        </span>
-                        <small style={{ color: "var(--muted)", fontSize: "11px" }}>
-                          {new Date(msg.created_at).toLocaleString()}
-                        </small>
+                  [...activeTicket.messages]
+                    .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+                    .map((msg) => (
+                      <div
+                        key={msg.id}
+                        style={{
+                          padding: "12px 16px",
+                          borderRadius: "8px",
+                          border: "1px solid var(--border)",
+                          background: msg.is_staff ? "rgba(212, 175, 55, 0.04)" : "rgba(255, 255, 255, 0.02)",
+                          alignSelf: msg.is_staff ? "flex-start" : "stretch",
+                        }}
+                      >
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+                          <span style={{ fontSize: "12px", fontWeight: 600, color: msg.is_staff ? "var(--gold)" : "inherit" }}>
+                            {msg.is_staff ? "TheCodexThrill Engineering" : "Client Message"}
+                          </span>
+                          <small style={{ color: "var(--muted)", fontSize: "11px" }}>
+                            {new Date(msg.created_at).toLocaleString()}
+                          </small>
+                        </div>
+                        <p style={{ margin: 0, fontSize: "14px", lineHeight: "1.6", whiteSpace: "pre-wrap" }}>
+                          {msg.message}
+                        </p>
                       </div>
-                      <p style={{ margin: 0, fontSize: "14px", lineHeight: "1.6", whiteSpace: "pre-wrap" }}>
-                        {msg.message}
-                      </p>
-                    </div>
-                  ))
+                    ))
                 ) : (
                   <p className="module-empty">No conversation messages in this thread yet.</p>
                 )}
@@ -331,7 +368,7 @@ export function SupportManager({ tickets, isStaff, userOrganizations = [], notic
               {activeTicket.status !== "closed" ? (
                 <form action={addTicketMessageAction} className="auth-form" style={{ borderTop: "1px solid var(--border)", paddingTop: "16px" }}>
                   <input type="hidden" name="ticket_id" value={activeTicket.id} />
-                  <input type="hidden" name="is_staff" value={isStaff ? "true" : "false"} />
+                  <input type="hidden" name="return_path" value={isStaff ? "admin" : "portal"} />
                   <label>
                     Post a Response
                     <textarea
