@@ -183,3 +183,4 @@ runNotificationsAcceptanceTest().catch((err) => {
   console.error("Unhandled rejection in notifications acceptance test:", err);
   process.exit(1);
 });
+

@@ -950,6 +950,7 @@ export async function WorkspaceContent({
         userOrganizations={orgs}
         currentMode={key === "tasks" ? "tasks" : "projects"}
         notice={notice}
+        queryError={projectsResult.error?.message}
       />
     );
   }
@@ -986,6 +987,7 @@ export async function WorkspaceContent({
         isStaff={kind === "admin"}
         userOrganizations={orgs}
         notice={notice}
+        queryError={documentsResult.error?.message}
       />
     );
   }

@@ -336,11 +336,19 @@ export async function createTaskAction(formData: FormData) {
   }
 
   const supabase = await createClient();
+  const { data: project } = await supabase
+    .from("tenant_projects")
+    .select("organization_id")
+    .eq("id", parsed.data.project_id)
+    .single();
+
+  const effectiveOrgId = project?.organization_id || parsed.data.organization_id;
+
   const { error } = await supabase.from("tenant_tasks").insert({
     title: parsed.data.title,
     description: parsed.data.description,
     project_id: parsed.data.project_id,
-    organization_id: parsed.data.organization_id,
+    organization_id: effectiveOrgId,
     status: parsed.data.status,
     priority: parsed.data.priority,
     due_date: parsed.data.due_date ? parsed.data.due_date : null,
@@ -451,31 +459,65 @@ const documentSchema = z.object({
 export async function createDocumentRecordAction(formData: FormData) {
   const rawProjectId = formData.get("project_id");
   const projectId = typeof rawProjectId === "string" && rawProjectId.trim() ? rawProjectId.trim() : undefined;
-
-  const parsed = documentSchema.safeParse({
-    name: formData.get("name"),
-    file_url: formData.get("file_url"),
-    organization_id: formData.get("organization_id"),
-    project_id: projectId,
-    category: formData.get("category"),
-  });
-
   const returnPath = formData.get("return_path") === "portal" ? "/portal/files" : "/admin/files";
 
-  if (!parsed.success) {
+  const organizationId = z.string().uuid().safeParse(formData.get("organization_id"));
+  const name = z.string().trim().min(1).max(255).safeParse(formData.get("name"));
+  const category = z.enum(["contract", "deliverable", "invoice", "asset", "specification", "other"]).safeParse(formData.get("category"));
+
+  if (!organizationId.success || !name.success || !category.success) {
     redirect(`${returnPath}?error=invalid`);
   }
 
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const file = formData.get("file");
+  let fileUrl = (formData.get("file_url") as string)?.trim() || "";
+  let fileSizeBytes = 0;
+  let fileType = "application/octet-stream";
+
+  if (file && typeof file === "object" && "size" in file && (file as File).size > 0) {
+    const uploadedFile = file as File;
+    const adminSupabase = createAdminClient();
+    const sanitizedFileName = uploadedFile.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+    const storagePath = `${organizationId.data}/${Date.now()}-${sanitizedFileName}`;
+    const arrayBuffer = await uploadedFile.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+
+    const { error: uploadErr } = await adminSupabase.storage
+      .from("tenant-documents")
+      .upload(storagePath, buffer, {
+        contentType: uploadedFile.type || "application/octet-stream",
+        upsert: false,
+      });
+
+    if (uploadErr) {
+      console.error("Storage upload error:", uploadErr);
+      redirect(`${returnPath}?error=save`);
+    }
+
+    const { data: signedData } = await adminSupabase.storage
+      .from("tenant-documents")
+      .createSignedUrl(storagePath, 60 * 60 * 24 * 7); // 7 days signed URL
+
+    fileUrl = signedData?.signedUrl || storagePath;
+    fileSizeBytes = uploadedFile.size;
+    fileType = uploadedFile.type || "application/octet-stream";
+  } else if (!fileUrl) {
+    redirect(`${returnPath}?error=invalid`);
+  }
 
   const { error } = await supabase.from("tenant_documents").insert({
-    name: parsed.data.name,
-    file_url: parsed.data.file_url,
-    organization_id: parsed.data.organization_id,
-    project_id: parsed.data.project_id || null,
-    category: parsed.data.category,
-    uploaded_by: user?.id ?? null,
+    name: name.data,
+    file_url: fileUrl,
+    file_size_bytes: fileSizeBytes,
+    file_type: fileType,
+    organization_id: organizationId.data,
+    project_id: projectId || null,
+    category: category.data,
+    uploaded_by: user.id,
   });
 
   if (error) {
@@ -496,9 +538,27 @@ export async function deleteDocumentAction(formData: FormData) {
   }
 
   const supabase = await createClient();
+  const { data: doc } = await supabase
+    .from("tenant_documents")
+    .select("file_url")
+    .eq("id", id.data)
+    .single();
+
   const { error } = await supabase.from("tenant_documents").delete().eq("id", id.data);
   if (error) {
     redirect(`${returnPath}?error=save`);
+  }
+
+  if (doc?.file_url?.includes("tenant-documents/")) {
+    try {
+      const adminClient = createAdminClient();
+      const storagePath = doc.file_url.split("tenant-documents/")[1]?.split("?")[0];
+      if (storagePath) {
+        await adminClient.storage.from("tenant-documents").remove([storagePath]);
+      }
+    } catch {
+      // Non-blocking cleanup
+    }
   }
 
   revalidatePath("/admin/files");

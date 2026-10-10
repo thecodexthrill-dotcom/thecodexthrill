@@ -46,6 +46,7 @@ type ProjectManagerProps = {
   userOrganizations?: { id: string; name: string }[];
   currentMode: "projects" | "tasks";
   notice?: string;
+  queryError?: string;
 };
 
 export function ProjectManager({
@@ -54,6 +55,7 @@ export function ProjectManager({
   userOrganizations = [],
   currentMode = "projects",
   notice,
+  queryError,
 }: ProjectManagerProps) {
   const [selectedProjectId] = useState<string | null>(
     projects[0]?.id ?? null
@@ -68,6 +70,21 @@ export function ProjectManager({
   if (currentMode === "tasks") {
     return (
       <div className="workspace-content" style={{ display: "grid", gap: "24px" }}>
+        {queryError && (
+          <div
+            role="alert"
+            style={{
+              color: "#ef4444",
+              background: "rgba(239, 68, 68, 0.1)",
+              padding: "12px 16px",
+              borderRadius: "6px",
+              border: "1px solid rgba(239, 68, 68, 0.25)",
+              fontSize: "14px",
+            }}
+          >
+            <strong>Database Notice:</strong> Unable to load tasks from Supabase ({queryError}).
+          </div>
+        )}
         {notice && (
           <p className={notice === "invalid" || notice === "save" ? "module-alert" : "module-success"} role="status">
             {notice === "created" ? "Task created successfully." : notice === "updated" ? "Task updated successfully." : notice === "deleted" ? "Task deleted." : notice}
@@ -320,6 +337,21 @@ export function ProjectManager({
 
   return (
     <div className="workspace-content" style={{ display: "grid", gap: "24px" }}>
+      {queryError && (
+        <div
+          role="alert"
+          style={{
+            color: "#ef4444",
+            background: "rgba(239, 68, 68, 0.1)",
+            padding: "12px 16px",
+            borderRadius: "6px",
+            border: "1px solid rgba(239, 68, 68, 0.25)",
+            fontSize: "14px",
+          }}
+        >
+          <strong>Database Notice:</strong> Unable to load projects from Supabase ({queryError}).
+        </div>
+      )}
       {notice && (
         <p className={notice === "invalid" || notice === "save" ? "module-alert" : "module-success"} role="status">
           {notice === "created" ? "Project created successfully." : notice === "updated" ? "Project updated successfully." : notice === "deleted" ? "Project deleted." : notice}

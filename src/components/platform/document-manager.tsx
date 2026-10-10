@@ -26,6 +26,7 @@ type DocumentManagerProps = {
   isStaff: boolean;
   userOrganizations?: { id: string; name: string }[];
   notice?: string;
+  queryError?: string;
 };
 
 export function DocumentManager({
@@ -33,6 +34,7 @@ export function DocumentManager({
   isStaff,
   userOrganizations = [],
   notice,
+  queryError,
 }: DocumentManagerProps) {
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
@@ -44,6 +46,22 @@ export function DocumentManager({
 
   return (
     <div className="workspace-content" style={{ display: "grid", gap: "24px" }}>
+      {queryError && (
+        <div
+          role="alert"
+          style={{
+            color: "#ef4444",
+            background: "rgba(239, 68, 68, 0.1)",
+            padding: "12px 16px",
+            borderRadius: "6px",
+            border: "1px solid rgba(239, 68, 68, 0.25)",
+            fontSize: "14px",
+          }}
+        >
+          <strong>Database Notice:</strong> Unable to load documents from Supabase ({queryError}).
+        </div>
+      )}
+
       {notice && (
         <p className={notice === "invalid" || notice === "save" ? "module-alert" : "module-success"} role="status">
           {notice === "created" ? "Document record created." : notice === "deleted" ? "Document record deleted." : notice}
@@ -93,7 +111,7 @@ export function DocumentManager({
             </button>
           </div>
 
-          <form action={createDocumentRecordAction} className="auth-form" style={{ marginTop: "16px", display: "grid", gap: "14px" }}>
+          <form action={createDocumentRecordAction} encType="multipart/form-data" className="auth-form" style={{ marginTop: "16px", display: "grid", gap: "14px" }}>
             <input type="hidden" name="return_path" value={isStaff ? "admin" : "portal"} />
             <label>
               Organization
@@ -109,10 +127,17 @@ export function DocumentManager({
               <input name="name" required maxLength={255} placeholder="e.g., Master Services Agreement (2026-Q4)" />
             </label>
 
-            <label>
-              File URL / Storage Link
-              <input name="file_url" type="url" required placeholder="https://..." />
-            </label>
+            <div style={{ display: "grid", gap: "8px", background: "rgba(255, 255, 255, 0.02)", padding: "12px", borderRadius: "6px", border: "1px solid var(--border)" }}>
+              <label style={{ fontSize: "13px" }}>
+                Option A: Upload File to Cloud Storage (PDF, Doc, Image, Zip)
+                <input name="file" type="file" style={{ fontSize: "12px", marginTop: "4px" }} />
+              </label>
+              <div style={{ textAlign: "center", color: "var(--muted)", fontSize: "11px" }}>— OR —</div>
+              <label style={{ fontSize: "13px" }}>
+                Option B: External Resource URL (Figma, GitHub, Shared Cloud Link)
+                <input name="file_url" type="url" placeholder="https://..." style={{ fontSize: "12px", marginTop: "4px" }} />
+              </label>
+            </div>
 
             <label>
               Category
