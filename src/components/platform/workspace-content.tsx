@@ -75,6 +75,11 @@ import {
   type AnalyticsData,
 } from "@/components/platform/analytics-dashboard";
 import { LeadsTable } from "@/components/platform/leads-table";
+import { UserManagementDirectory } from "@/components/platform/user-management-directory";
+import {
+  loadSuperAdminUserDirectory,
+  type PlatformInvitationRpcRow,
+} from "@/lib/supabase/user-management-service";
 
 const sections: Record<string, { title: string; description: string; status: string }> = {
   overview: { title: "Workspace overview", description: "Your workspace entry point and available modules.", status: "Core identity and access foundation" },
@@ -296,7 +301,14 @@ export async function WorkspaceContent({
 
   if (kind === "admin" && key === "team") {
     const supabase = await createClient();
-    const [{ data: invitationData, error: invitationError }, { data: userData, error: userError }] = await Promise.all([
+    const [
+      {
+        data: { user: currentUser },
+      },
+      { data: invitationData, error: invitationError },
+      { data: userData, error: userError },
+    ] = await Promise.all([
+      supabase.auth.getUser(),
       supabase.rpc("list_platform_invitations"),
       supabase.rpc("list_platform_users"),
     ]);
@@ -309,16 +321,111 @@ export async function WorkspaceContent({
         metadata: { code: safeInvitationListErrorCode(invitationError.code) },
       });
     }
-    const invitations = (invitationData ?? []) as { id: string; email: string; role: string; status: string; created_at: string; expires_at: string; auth_user_id: string | null; resend_count: number; last_resent_at: string | null; archived_at: string | null }[];
-    const users = (userData ?? []) as { user_id: string; email: string; display_name: string | null; roles: string[]; created_at: string; email_confirmed: boolean }[];
-    const canAssignPlatformAdmin = roles.includes("super_admin");
-    return <div className="workspace-content">
-      <section className="module-panel"><p className="eyebrow">INVITATION ONLY</p><h2>Invite a platform user</h2><p>Invitations bind a one-hour, single-use role. Only the Super Admin can invite a Platform Admin; Super Admin and Platform Admin can invite Developer or Support Staff.</p><InvitationForm /></section>
-      <section className="module-panel"><h2>Staff accounts</h2><p>Platform roles require a confirmed invited account and verified MFA. Role changes are audited and enforced by Supabase.</p>
-        {userError ? <p className="module-alert" role="alert">Staff records are unavailable under this session. Verify the account has platform administration access and an AAL2 session.</p> : users.length === 0 ? <p className="module-empty">No invited staff accounts are available.</p> : <div className="module-table-wrap"><table className="module-table"><thead><tr><th>Account</th><th>Platform role</th><th>Joined</th><th>Manage role</th></tr></thead><tbody>{users.map((user) => <tr key={user.user_id}><td><strong>{user.display_name || user.email.split("@")[0]}</strong><small>{user.email}{user.email_confirmed ? " · Email confirmed" : " · Email not confirmed"}</small></td><td>{user.roles.length ? user.roles.map((role) => role.replaceAll("_", " ")).join(", ") : "No platform role"}</td><td>{new Date(user.created_at).toLocaleDateString()}</td><td><PlatformRoleActions canAssignPlatformAdmin={canAssignPlatformAdmin} emailConfirmed={user.email_confirmed} roles={user.roles} userId={user.user_id} /></td></tr>)}</tbody></table></div>}
-      </section>
-      <section className="module-panel"><h2>Invitations</h2>{invitationError ? <p className="module-alert" role="alert">{invitationListFailureMessage(invitationError.code)}</p> : invitations.length === 0 ? <p className="module-empty">No invitations yet.</p> : <div className="module-table-wrap"><table className="module-table"><thead><tr><th>Email</th><th>Role</th><th>Status</th><th>Created</th><th>Expires</th><th>Resent</th><th>Archived</th><th>Actions</th></tr></thead><tbody>{invitations.map((invitation) => { const canManageInvitation = roles.includes("super_admin") || (roles.includes("platform_admin") && invitation.role !== "platform_admin"); return <tr key={invitation.id}><td>{invitation.email}</td><td>{invitation.role.replaceAll("_", " ")}</td><td>{invitation.status}{invitation.archived_at ? " · Archived" : ""}</td><td>{new Date(invitation.created_at).toLocaleString()}</td><td>{new Date(invitation.expires_at).toLocaleString()}</td><td>{invitation.resend_count ? <>{invitation.resend_count} · {invitation.last_resent_at ? new Date(invitation.last_resent_at).toLocaleString() : "time unavailable"}</> : "Never"}</td><td>{invitation.archived_at ? new Date(invitation.archived_at).toLocaleString() : "—"}</td><td>{canManageInvitation && !invitation.archived_at && (invitation.status === "pending" || invitation.status === "expired" || invitation.status === "accepted" || invitation.status === "revoked") && <InvitationRowActions canArchive={invitation.status !== "pending"} canResend={invitation.status === "pending" || invitation.status === "expired"} canRevoke={invitation.status === "pending"} id={invitation.id} />}</td></tr>; })}</tbody></table></div>}</section>
-    </div>;
+    const invitations = (invitationData ?? []) as PlatformInvitationRpcRow[];
+    const users = (userData ?? []) as {
+      user_id: string;
+      email: string;
+      display_name: string | null;
+      roles: string[];
+      created_at: string;
+      email_confirmed: boolean;
+    }[];
+    const isSuperAdminActor = roles.includes("super_admin");
+    const canAssignPlatformAdmin = isSuperAdminActor;
+    const directoryResult = await loadSuperAdminUserDirectory({
+      actorUserId: currentUser?.id ?? "",
+      invitations,
+    });
+
+    return (
+      <div className="workspace-content">
+        <section className="module-panel">
+          <p className="eyebrow">INVITATION ONLY</p>
+          <h2>Invite a platform user</h2>
+          <p>
+            Invitations bind a one-hour, single-use role. Only the Super Admin
+            can invite a Platform Admin; Super Admin and Platform Admin can
+            invite Developer or Support Staff.
+          </p>
+          <InvitationForm />
+        </section>
+
+        <UserManagementDirectory
+          canAssignPlatformAdmin={canAssignPlatformAdmin}
+          directoryError={directoryResult.error}
+          isSuperAdminActor={isSuperAdminActor}
+          users={directoryResult.users}
+        />
+
+        {directoryResult.error && (
+          <section className="module-panel">
+            <h2>Invited staff accounts (RPC fallback)</h2>
+            <p>
+              Platform roles require a confirmed invited account and verified
+              MFA. Role changes are audited and enforced by Supabase.
+            </p>
+            {userError ? (
+              <p className="module-alert" role="alert">
+                Staff records are unavailable under this session. Verify the
+                account has platform administration access and an AAL2 session.
+              </p>
+            ) : users.length === 0 ? (
+              <p className="module-empty">
+                No invited staff accounts are available.
+              </p>
+            ) : (
+              <div className="module-table-wrap">
+                <table className="module-table">
+                  <thead>
+                    <tr>
+                      <th>Account</th>
+                      <th>Platform role</th>
+                      <th>Joined</th>
+                      <th>Manage role</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {users.map((user) => (
+                      <tr key={user.user_id}>
+                        <td>
+                          <strong>
+                            {user.display_name || user.email.split("@")[0]}
+                          </strong>
+                          <small>
+                            {user.email}
+                            {user.email_confirmed
+                              ? " · Email confirmed"
+                              : " · Email not confirmed"}
+                          </small>
+                        </td>
+                        <td>
+                          {user.roles.length
+                            ? user.roles
+                                .map((role) => role.replaceAll("_", " "))
+                                .join(", ")
+                            : "No platform role"}
+                        </td>
+                        <td>{new Date(user.created_at).toLocaleDateString()}</td>
+                        <td>
+                          <PlatformRoleActions
+                            canAssignPlatformAdmin={canAssignPlatformAdmin}
+                            emailConfirmed={user.email_confirmed}
+                            roles={user.roles}
+                            userId={user.user_id}
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        )}
+
+        <section className="module-panel"><h2>Invitations</h2>{invitationError ? <p className="module-alert" role="alert">{invitationListFailureMessage(invitationError.code)}</p> : invitations.length === 0 ? <p className="module-empty">No invitations yet.</p> : <div className="module-table-wrap"><table className="module-table"><thead><tr><th>Email</th><th>Role</th><th>Status</th><th>Created</th><th>Expires</th><th>Resent</th><th>Archived</th><th>Actions</th></tr></thead><tbody>{invitations.map((invitation) => { const canManageInvitation = roles.includes("super_admin") || (roles.includes("platform_admin") && invitation.role !== "platform_admin"); return <tr key={invitation.id}><td>{invitation.email}</td><td>{invitation.role.replaceAll("_", " ")}</td><td>{invitation.status}{invitation.archived_at ? " · Archived" : ""}</td><td>{new Date(invitation.created_at).toLocaleString()}</td><td>{new Date(invitation.expires_at).toLocaleString()}</td><td>{invitation.resend_count ? <>{invitation.resend_count} · {invitation.last_resent_at ? new Date(invitation.last_resent_at).toLocaleString() : "time unavailable"}</> : "Never"}</td><td>{invitation.archived_at ? new Date(invitation.archived_at).toLocaleString() : "—"}</td><td>{canManageInvitation && !invitation.archived_at && (invitation.status === "pending" || invitation.status === "expired" || invitation.status === "accepted" || invitation.status === "revoked") && <InvitationRowActions canArchive={invitation.status !== "pending"} canResend={invitation.status === "pending" || invitation.status === "expired"} canRevoke={invitation.status === "pending"} id={invitation.id} />}</td></tr>; })}</tbody></table></div>}</section>
+      </div>
+    );
   }
 
   if (kind === "admin" && key === "leads") {

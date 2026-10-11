@@ -13,7 +13,12 @@ import { invitationRedirectTo } from "@/lib/supabase/invitation-link";
 import { invitationEmailFailureMessage, safeInvitationEmailCode } from "@/lib/supabase/invitation-email-status";
 import { safeInvitationListErrorCode } from "@/lib/supabase/invitation-list-status";
 import { hasFreshInvitationSession } from "@/lib/supabase/invitation-handoff";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
+import {
+  permanentlyDeleteSupabaseAuthUser,
+  restoreUserWorkspaceAccess,
+  revokeUserWorkspaceAccess,
+} from "@/lib/supabase/user-management-service";
 
 export type AuthActionState = { error?: string; message?: string; passwordUpdated?: boolean };
 
@@ -354,3 +359,192 @@ export async function removeAuthenticatorFactorAction(
   revalidatePath("/mfa");
   return { message: "Authenticator removed. At least one verified factor remains active." };
 }
+
+async function verifySameOriginRequest(): Promise<boolean> {
+  const hdrs = await headers();
+  const origin = hdrs.get("origin");
+  if (!origin) return true;
+  const host = hdrs.get("x-forwarded-host") || hdrs.get("host");
+  if (!host) return false;
+  try {
+    const originHost = new URL(origin).host.toLowerCase();
+    return originHost === host.trim().toLowerCase();
+  } catch {
+    return false;
+  }
+}
+
+export async function revokeUserAccessAction(
+  _previousState: AuthActionState,
+  formData: FormData,
+): Promise<AuthActionState> {
+  if (!(await verifySameOriginRequest())) {
+    return { error: "Cross-origin request rejected." };
+  }
+
+  const parsed = z
+    .object({
+      targetUserId: z.string().uuid(),
+      reason: z.string().trim().max(280).optional(),
+    })
+    .safeParse({
+      targetUserId: formData.get("target-user-id"),
+      reason: formData.get("reason") || undefined,
+    });
+  if (!parsed.success) {
+    return { error: "Select a valid user account to revoke access." };
+  }
+
+  const { user, roles } = await requireWorkspace("admin", ["team"]);
+  if (!roles.includes("super_admin")) {
+    return { error: "Only the Global Super Admin can disable or revoke user accounts." };
+  }
+
+  const supabase = await createClient();
+  const { data: assurance, error: assuranceError } =
+    await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+  if (assuranceError || assurance?.currentLevel !== "aal2") {
+    return { error: "Verify your MFA (AAL2) session before revoking user access." };
+  }
+
+  const result = await revokeUserWorkspaceAccess({
+    actorUserId: user.id,
+    actorRoles: roles,
+    actorMfaLevel: assurance.currentLevel,
+    targetUserId: parsed.data.targetUserId,
+    reason: parsed.data.reason,
+    userSupabaseClient: supabase,
+  });
+
+  if (!result.ok) {
+    return { error: result.error ?? "Could not revoke account access." };
+  }
+
+  revalidatePath("/admin/team");
+  revalidatePath("/admin/roles");
+  revalidatePath("/admin/audit-logs");
+  return { message: result.message ?? "Account access revoked." };
+}
+
+export async function restoreUserAccessAction(
+  _previousState: AuthActionState,
+  formData: FormData,
+): Promise<AuthActionState> {
+  if (!(await verifySameOriginRequest())) {
+    return { error: "Cross-origin request rejected." };
+  }
+
+  const parsed = z
+    .object({
+      targetUserId: z.string().uuid(),
+    })
+    .safeParse({
+      targetUserId: formData.get("target-user-id"),
+    });
+  if (!parsed.success) {
+    return { error: "Select a valid disabled user account to restore." };
+  }
+
+  const { user, roles } = await requireWorkspace("admin", ["team"]);
+  if (!roles.includes("super_admin")) {
+    return { error: "Only the Global Super Admin can restore disabled user accounts." };
+  }
+
+  const supabase = await createClient();
+  const { data: assurance, error: assuranceError } =
+    await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+  if (assuranceError || assurance?.currentLevel !== "aal2") {
+    return { error: "Verify your MFA (AAL2) session before restoring user access." };
+  }
+
+  const result = await restoreUserWorkspaceAccess({
+    actorUserId: user.id,
+    actorRoles: roles,
+    actorMfaLevel: assurance.currentLevel,
+    targetUserId: parsed.data.targetUserId,
+  });
+
+  if (!result.ok) {
+    return { error: result.error ?? "Could not restore account access." };
+  }
+
+  revalidatePath("/admin/team");
+  revalidatePath("/admin/roles");
+  revalidatePath("/admin/audit-logs");
+  return { message: result.message ?? "Account access restored." };
+}
+
+export async function permanentlyDeleteUserAction(
+  _previousState: AuthActionState,
+  formData: FormData,
+): Promise<AuthActionState> {
+  if (!(await verifySameOriginRequest())) {
+    return { error: "Cross-origin request rejected." };
+  }
+
+  const parsed = z
+    .object({
+      targetUserId: z.string().uuid(),
+      confirmationEmail: z.string().trim().min(3).max(320),
+      typedConfirmation: z.string().trim().min(3).max(340),
+    })
+    .safeParse({
+      targetUserId: formData.get("target-user-id"),
+      confirmationEmail: formData.get("confirmation-email"),
+      typedConfirmation: formData.get("typed-confirmation"),
+    });
+
+  if (!parsed.success) {
+    return {
+      error:
+        "Provide a valid target user ID, confirmation email, and typed confirmation phrase.",
+    };
+  }
+
+  const { user, roles } = await requireWorkspace("admin", ["team"]);
+  if (!roles.includes("super_admin")) {
+    return {
+      error: "Only the Global Super Admin is authorized to permanently delete users.",
+    };
+  }
+
+  const supabase = await createClient();
+  const { data: assurance, error: assuranceError } =
+    await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+  if (assuranceError || assurance?.currentLevel !== "aal2") {
+    return {
+      error:
+        "A verified MFA (AAL2) session is required before permanently deleting a user.",
+    };
+  }
+
+  const result = await permanentlyDeleteSupabaseAuthUser({
+    actorUserId: user.id,
+    actorRoles: roles,
+    actorMfaLevel: assurance.currentLevel,
+    targetUserId: parsed.data.targetUserId,
+    confirmationEmail: parsed.data.confirmationEmail,
+    typedConfirmation: parsed.data.typedConfirmation,
+  });
+
+  if (!result.ok) {
+    return {
+      error:
+        result.error ??
+        "Permanent user deletion was rejected. Review account dependencies and retry.",
+    };
+  }
+
+  revalidatePath("/admin/team");
+  revalidatePath("/admin/roles");
+  revalidatePath("/admin/audit-logs");
+  revalidatePath("/admin/analytics");
+  return { message: result.message ?? "User permanently deleted from Supabase Auth." };
+}
+
+export async function refreshUserDirectoryAction(): Promise<{ refreshedAt: string }> {
+  await requireWorkspace("admin", ["team"]);
+  revalidatePath("/admin/team");
+  return { refreshedAt: new Date().toISOString() };
+}
+

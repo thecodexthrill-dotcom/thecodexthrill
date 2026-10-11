@@ -54,6 +54,17 @@ export async function requireWorkspace(kind: "admin" | "portal", section: string
   const { data: { user }, error: userError } = await supabase.auth.getUser();
   if (userError || !user) redirect("/login");
 
+  const userMetadata = (user.user_metadata ?? {}) as Record<string, unknown>;
+  const bannedUntil = (user as { banned_until?: string | null }).banned_until;
+  const isBanned = Boolean(
+    bannedUntil &&
+      bannedUntil !== "none" &&
+      new Date(bannedUntil).getTime() > Date.now(),
+  );
+  if (userMetadata.account_access_revoked === true || isBanned) {
+    redirect("/access-denied");
+  }
+
   const { data: platformOperational, error: operationalError } = await supabase.rpc("platform_is_operational");
   if (operationalError) redirect("/setup-required?area=identity-schema");
   if (!platformOperational) redirect("/setup-required?area=super-admin-bootstrap");
