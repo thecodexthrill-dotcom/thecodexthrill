@@ -2,22 +2,19 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 import { getSupabasePublicEnv } from "@/lib/env";
+import { buildProxyAuthCallbackRedirect } from "@/lib/supabase/auth-callback";
 
 export async function proxy(request: NextRequest) {
-  const { pathname, searchParams } = request.nextUrl;
-  if (
-    (pathname === "/invite/accept" || pathname === "/reset-password") &&
-    (searchParams.has("token_hash") || searchParams.has("code"))
-  ) {
-    const callbackUrl = new URL("/auth/callback", request.url);
-    callbackUrl.searchParams.set("next", pathname);
-    const tokenHash = searchParams.get("token_hash");
-    const code = searchParams.get("code");
-    const type = searchParams.get("type") ?? (pathname === "/invite/accept" ? "invite" : "recovery");
-    if (tokenHash) callbackUrl.searchParams.set("token_hash", tokenHash);
-    if (code) callbackUrl.searchParams.set("code", code);
-    if (type) callbackUrl.searchParams.set("type", type);
-    return NextResponse.redirect(callbackUrl, { status: 307 });
+  const callbackRedirect = buildProxyAuthCallbackRedirect(request.nextUrl);
+  if (callbackRedirect) {
+    return NextResponse.redirect(callbackRedirect, {
+      status: 307,
+      headers: { "cache-control": "no-store" },
+    });
+  }
+
+  if (request.nextUrl.pathname === "/") {
+    return NextResponse.next({ request });
   }
 
   let response = NextResponse.next({ request });
@@ -52,6 +49,7 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
+    "/",
     "/admin/:path*",
     "/portal/:path*",
     "/login",

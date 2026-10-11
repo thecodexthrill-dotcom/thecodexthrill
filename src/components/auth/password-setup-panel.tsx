@@ -17,7 +17,23 @@ export function PasswordSetupPanel({ sessionValid, linkStatus, sessionUnavailabl
   const [confirmation, setConfirmation] = useState("");
   const [showPasswords, setShowPasswords] = useState(false);
   const [clientError, setClientError] = useState("");
+  const [clientVerified, setClientVerified] = useState(false);
+  const [verifyingLink, setVerifyingLink] = useState(false);
   const router = useRouter();
+
+  useEffect(() => {
+    function handleRecoverySession(event: Event) {
+      const detail = (event as CustomEvent<string>).detail;
+      if (detail === "verifying") {
+        setVerifyingLink(true);
+      } else if (detail === "verified") {
+        setVerifyingLink(false);
+        setClientVerified(true);
+      }
+    }
+    window.addEventListener("ctt:recovery-session", handleRecoverySession);
+    return () => window.removeEventListener("ctt:recovery-session", handleRecoverySession);
+  }, []);
 
   useEffect(() => {
     if (!state.passwordUpdated) return;
@@ -27,6 +43,7 @@ export function PasswordSetupPanel({ sessionValid, linkStatus, sessionUnavailabl
 
   const lengthValid = password.length >= 12;
   const confirmationMatches = confirmation.length > 0 && password === confirmation;
+  const effectiveSessionValid = (sessionValid || clientVerified) && !linkStatus && !sessionUnavailable;
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     setClientError("");
@@ -51,7 +68,7 @@ export function PasswordSetupPanel({ sessionValid, linkStatus, sessionUnavailabl
         <p className="auth-description">Choose a new password for your TheCodexThrill account.</p>
         <div className="auth-notice"><ShieldCheck aria-hidden="true" size={18} /><p>Your password is updated securely through Supabase. Account access still follows your assigned permissions and MFA requirements.</p></div>
 
-        {sessionValid && !linkStatus && !sessionUnavailable ? (
+        {effectiveSessionValid ? (
           state.passwordUpdated ? (
             <div aria-live="polite" className="password-result password-result--success" role="status">
               <strong>Password updated successfully.</strong>
@@ -87,8 +104,8 @@ export function PasswordSetupPanel({ sessionValid, linkStatus, sessionUnavailabl
           <div className="module-hold" role="status">
             <ShieldCheck aria-hidden="true" size={18} />
             <div>
-              <strong>{linkStatus === "expired" ? "This recovery link has expired" : linkStatus === "used" ? "This recovery link has already been used" : linkStatus === "invalid" ? "This recovery link is invalid" : sessionUnavailable ? "Secure recovery session could not be established" : "Recovery session required"}</strong>
-              <p>{linkStatus ? "Recovery links expire or can be used only once. Request a fresh email, then open its link in this browser." : sessionUnavailable ? "Supabase verified the callback but did not confirm a complete browser session. Request a fresh recovery email and open the newest link." : "Open the password recovery link from your email in this browser. Once Supabase verifies it, the password form will appear here."}</p>
+              <strong>{verifyingLink ? "Verifying your recovery link…" : linkStatus === "expired" ? "This recovery link has expired" : linkStatus === "used" ? "This recovery link has already been used" : linkStatus === "invalid" ? "This recovery link is invalid" : sessionUnavailable ? "Secure recovery session could not be established" : "Recovery session required"}</strong>
+              <p>{verifyingLink ? "Establishing your secure recovery session with Supabase…" : linkStatus ? "Recovery links expire or can be used only once. Request a fresh email, then open its link in this browser." : sessionUnavailable ? "Supabase verified the callback but did not confirm a complete browser session. Request a fresh recovery email and open the newest link." : "Open the password recovery link from your email in this browser. Once Supabase verifies it, the password form will appear here."}</p>
               <Link href="/forgot-password">Request a fresh recovery email</Link>
             </div>
           </div>

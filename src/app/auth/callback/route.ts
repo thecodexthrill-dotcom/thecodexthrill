@@ -51,9 +51,19 @@ export async function GET(request: NextRequest) {
   const isLoopback = (host: string) => host === "localhost" || host === "127.0.0.1" || host === "[::1]";
   const redirectBase = isLoopback(configuredBase.hostname) && isLoopback(callbackBase.hostname) && configuredBase.port === callbackBase.port ? callbackBase : configuredBase;
   const redirectOrigin = redirectBase.origin;
-  const callbackError = url.searchParams.get("error_code") ?? url.searchParams.get("error");
+  const callbackError = url.searchParams.get("error_code") ?? url.searchParams.get("error") ?? url.searchParams.get("error_description");
+  const hasRequestAuthCookie = request.cookies.getAll().some(({ name }) => /-auth-token(?:\.\d+)?$/.test(name));
 
   if (callbackError && (next === "/invite/accept" || next === "/reset-password")) {
+    if (next === "/reset-password" && hasRequestAuthCookie) {
+      const probeResponse = NextResponse.redirect(new URL("/reset-password", redirectOrigin));
+      probeResponse.headers.set("cache-control", "no-store");
+      const probeSupabase = createSupabase(request, probeResponse);
+      const { data: existingClaims } = await probeSupabase.auth.getClaims();
+      if (existingClaims?.claims?.sub && hasAuthFlowMethod(existingClaims.claims.amr, "recovery")) {
+        return probeResponse;
+      }
+    }
     const status = classifyLinkError(callbackError);
     console.info("[auth.callback] provider rejected link", { destination: next, status });
     return statusRedirect(next, redirectOrigin, status);
@@ -78,7 +88,7 @@ export async function GET(request: NextRequest) {
   // Preserve the browser-only implicit fragment handoff for legacy recovery links.
   if (!code && !tokenHash && next === "/reset-password") {
     const nonce = crypto.randomUUID().replaceAll("-", "");
-    const script = 'const target="/reset-password";const p=new URLSearchParams(window.location.hash.slice(1));if(p.has("error")||p.has("error_code")||p.has("error_description")){const c=(p.get("error_code")||p.get("error")||"").toLowerCase();const s=c.includes("expired")?"expired":c.includes("used")||c.includes("already")?"used":"invalid";window.location.replace(target+"?auth="+(s==="invalid"?"link-invalid":s))}else{window.location.replace(target+window.location.hash)}';
+    const script = 'const target="/reset-password";const p=new URLSearchParams(window.location.hash.slice(1));if(p.has("error")||p.has("error_code")||p.has("error_description")){const c=(p.get("error_code")||p.get("error")||p.get("error_description")||"").toLowerCase();const s=c.includes("expired")?"expired":c.includes("used")||c.includes("already")?"used":"invalid";window.location.replace(target+"?auth="+(s==="invalid"?"link-invalid":s))}else if(p.has("access_token")&&p.has("refresh_token")){window.location.replace(target+window.location.hash)}else{window.location.replace(target+"?auth=link-invalid")}';
     const html = '<!doctype html><html><head><meta charset="utf-8"><title>Continue securely</title></head><body><p>Continuing securely...</p><script nonce="' + nonce + '">' + script + '</script></body></html>';
     const response = new NextResponse(html, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
     response.headers.set("content-security-policy", "default-src 'none'; script-src 'nonce-" + nonce + "'; base-uri 'none'; frame-ancestors 'none'");
@@ -89,7 +99,7 @@ export async function GET(request: NextRequest) {
   response.headers.set("cache-control", "no-store");
   const supabase = createSupabase(request, response);
   const flow = code ? "pkce_code" : tokenHash ? "token_hash" : "missing_credentials";
-  let verificationError: { code?: string; name?: string } | null = null;
+  let verificationError: { code?: string; name?: string; message?: string } | null = null;
   let sessionReturned = false;
   if (code) {
     const result = await supabase.auth.exchangeCodeForSession(code);
@@ -104,7 +114,13 @@ export async function GET(request: NextRequest) {
     return statusRedirect(next, redirectOrigin, "invalid");
   }
   if (verificationError) {
-    const status = classifyLinkError(verificationError.code ?? verificationError.name ?? "");
+    if (next === "/reset-password" && hasRequestAuthCookie) {
+      const { data: existingClaims } = await supabase.auth.getClaims();
+      if (existingClaims?.claims?.sub && hasAuthFlowMethod(existingClaims.claims.amr, "recovery")) {
+        return response;
+      }
+    }
+    const status = classifyLinkError(verificationError.code ?? verificationError.message ?? verificationError.name ?? "");
     console.info("[auth.callback] OTP verification failed", { flow, otpType: otpType ?? "code", status });
     return statusRedirect(next, redirectOrigin, status);
   }

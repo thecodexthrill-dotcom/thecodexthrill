@@ -14,13 +14,27 @@ export function resolveAppOrigin(localFallback?: string): URL | null {
   let configuredOrigin: string | undefined;
 
   if (isPreview) {
-    const usePreviewRedirect = Boolean(localFallback) || process.env.VERCEL_PREVIEW_AUTH_REDIRECT_ENABLED === "true";
-    if (usePreviewRedirect) {
-      const deploymentHost = process.env.VERCEL_URL;
-      if (!deploymentHost || !/^[a-z0-9.-]+\.vercel\.app$/i.test(deploymentHost)) return null;
-      configuredOrigin = `https://${deploymentHost}`;
-    } else {
-      configuredOrigin = SITE_ORIGIN;
+    if (localFallback) {
+      try {
+        const fallbackOrigin = new URL(localFallback);
+        if (
+          fallbackOrigin.protocol === "https:" &&
+          /^[a-z0-9.-]+\.vercel\.app$/i.test(fallbackOrigin.hostname)
+        ) {
+          configuredOrigin = fallbackOrigin.origin;
+        }
+      } catch {
+        // Ignore malformed fallback and fall through
+      }
+    }
+    if (!configuredOrigin) {
+      if (process.env.VERCEL_PREVIEW_AUTH_REDIRECT_ENABLED === "true") {
+        const deploymentHost = process.env.VERCEL_BRANCH_URL || process.env.VERCEL_URL;
+        if (!deploymentHost || !/^[a-z0-9.-]+\.vercel\.app$/i.test(deploymentHost)) return null;
+        configuredOrigin = `https://${deploymentHost}`;
+      } else {
+        configuredOrigin = SITE_ORIGIN;
+      }
     }
   } else if (isProduction) {
     const appBaseUrl = process.env.APP_BASE_URL;

@@ -3,7 +3,7 @@ import test from "node:test";
 import { readFileSync } from "node:fs";
 import { classifyAuthLinkError } from "./auth-link-status.ts";
 
-import { parseAuthCallbackParams } from "./auth-callback.ts";
+import { buildProxyAuthCallbackRedirect, parseAuthCallbackParams } from "./auth-callback.ts";
 import { buildAuthCallbackUrl, invitationRedirectTo, passwordRecoveryRedirectTo } from "./invitation-link.ts";
 import { invitationListFailureMessage, safeInvitationListErrorCode } from "./invitation-list-status.ts";
 
@@ -99,4 +99,87 @@ test("42702 ambiguous column error has explicit remediation message and SQL migr
   assert.match(fixMigration, /update public\.platform_invitations as pi\s+set status = 'expired'/i);
   assert.match(fixMigration, /where pi\.status = 'pending' and pi\.expires_at <= statement_timestamp\(\)/i);
   assert.match(fixMigration, /@\.method == "otp"/);
+});
+
+test("root-redirected otp_expired recovery link is intercepted and routed to /auth/callback?next=/reset-password", () => {
+  const strandedUrl = new URL(
+    "https://thecodexthrill.com/?error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid+or+has+expired",
+  );
+  const redirected = buildProxyAuthCallbackRedirect(strandedUrl);
+  assert.ok(redirected, "root URL with error_code=otp_expired must be intercepted");
+  assert.equal(redirected.pathname, "/auth/callback");
+  assert.equal(redirected.searchParams.get("next"), "/reset-password");
+  assert.equal(redirected.searchParams.get("error_code"), "otp_expired");
+
+  const parsed = parseAuthCallbackParams(redirected.searchParams);
+  assert.equal(parsed.next, "/reset-password");
+  assert.equal(classifyAuthLinkError(redirected.searchParams.get("error_code") ?? ""), "expired");
+});
+
+test("valid, expired, reused, and malformed recovery links resolve deterministically", () => {
+  // Valid recovery link (token_hash + type=recovery, or legacy token + type=recovery)
+  const validTokenHash = parseAuthCallbackParams(
+    new URLSearchParams("token_hash=pkce_valid_hash&type=recovery&next=%2Freset-password"),
+  );
+  assert.deepEqual(validTokenHash, {
+    code: null,
+    tokenHash: "pkce_valid_hash",
+    otpType: "recovery",
+    next: "/reset-password",
+  });
+
+  const validLegacyToken = parseAuthCallbackParams(
+    new URLSearchParams("token=legacy_recovery_token&type=recovery"),
+  );
+  assert.deepEqual(validLegacyToken, {
+    code: null,
+    tokenHash: "legacy_recovery_token",
+    otpType: "recovery",
+    next: "/reset-password",
+  });
+
+  // Root-redirected valid recovery code or token_hash
+  const rootRecoveryToken = buildProxyAuthCallbackRedirect(
+    new URL("https://thecodexthrill.com/?token_hash=pkce_valid_hash&type=recovery"),
+  );
+  assert.equal(rootRecoveryToken?.pathname, "/auth/callback");
+  assert.equal(rootRecoveryToken?.searchParams.get("next"), "/reset-password");
+
+  const rootPkceCode = buildProxyAuthCallbackRedirect(
+    new URL("https://thecodexthrill.com/?code=d71f3b2a-0000-4000-8000-000000000001"),
+  );
+  assert.equal(rootPkceCode?.pathname, "/auth/callback");
+  assert.equal(rootPkceCode?.searchParams.get("next"), "/reset-password");
+
+  // Reused recovery link
+  assert.equal(classifyAuthLinkError("otp_already_used"), "used");
+  assert.equal(classifyAuthLinkError("flow_state_already_used"), "used");
+
+  // Malformed / invalid recovery link
+  assert.equal(classifyAuthLinkError("access_denied"), "invalid");
+  assert.equal(classifyAuthLinkError("bad_code_verifier"), "invalid");
+
+  // Clean homepage request is untouched
+  assert.equal(buildProxyAuthCallbackRedirect(new URL("https://thecodexthrill.com/")), null);
+});
+
+test("proxy, SiteFrame, callback route, and RecoverySessionBridge protect against homepage strand and PKCE hash collision", () => {
+  const proxy = readFileSync("src/proxy.ts", "utf8");
+  const bridge = readFileSync("src/components/auth/recovery-session-bridge.tsx", "utf8");
+  const callback = readFileSync("src/app/auth/callback/route.ts", "utf8");
+
+  assert.match(proxy, /buildProxyAuthCallbackRedirect\(request\.nextUrl\)/);
+  assert.match(proxy, /"\/"/);
+
+  // RecoverySessionBridge must strip window.location.hash BEFORE calling createClient()
+  // so @supabase/ssr createBrowserClient (flowType: 'pkce') never throws AuthPKCEGrantCodeExchangeError.
+  const replaceStateIdx = bridge.indexOf("window.history.replaceState");
+  const createClientIdx = bridge.indexOf("createClient()");
+  assert.ok(
+    replaceStateIdx > 0 && createClientIdx > replaceStateIdx,
+    "RecoverySessionBridge must clear window.location.hash before calling createClient()",
+  );
+
+  // Callback route must redirect empty-hash /auth/callback?next=/reset-password to /reset-password?auth=link-invalid
+  assert.match(callback, /window\.location\.replace\(target\+"\?auth=link-invalid"\)/);
 });
