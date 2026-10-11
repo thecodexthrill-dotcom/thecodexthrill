@@ -8,6 +8,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { requireWorkspace } from "@/lib/supabase/access";
 import { extractLeadService } from "@/lib/supabase/lead-service-helper";
 import { dispatchPlatformStaffNotifications } from "@/lib/supabase/notification-service";
+import { logSanitizedOperationalEvent } from "@/lib/supabase/platform-health-helper";
 
 const managerRoles = ["super_admin", "platform_admin"] as const;
 const leadSchema = z.object({
@@ -159,7 +160,13 @@ export async function convertLeadToClientAction(formData: FormData) {
     .single();
 
   if (orgErr || !newOrg) {
-    console.error("[convertLead] Failed to create organization", orgErr);
+    logSanitizedOperationalEvent({
+      level: "error",
+      scope: "crm.convert_lead",
+      action: "organization_create_failed",
+      message: "Failed to create client organization during lead conversion",
+      metadata: { code: orgErr?.code, message: orgErr?.message },
+    });
     redirect(`/admin/leads?id=${lead.id}&error=save`);
   }
 
@@ -193,7 +200,13 @@ export async function convertLeadToClientAction(formData: FormData) {
     .single();
 
   if (projectErr) {
-    console.warn("[convertLead] Handover project warning", projectErr);
+    logSanitizedOperationalEvent({
+      level: "warn",
+      scope: "crm.convert_lead",
+      action: "handover_project_warning",
+      message: "Handover project creation warning during lead conversion",
+      metadata: { code: projectErr.code, message: projectErr.message },
+    });
   }
 
   // 5. Advance lead stage to 'converted'
@@ -212,11 +225,25 @@ export async function convertLeadToClientAction(formData: FormData) {
     if (!inviteErr) {
       onboardingStatus = "invited";
     } else {
-      console.warn("[convertLead] Auth invitation status:", inviteErr.message || inviteErr);
+      logSanitizedOperationalEvent({
+        level: "info",
+        scope: "crm.convert_lead",
+        action: "auth_invite_deferred",
+        message: "Auth invitation deferred to pending state",
+        metadata: { code: inviteErr.code, status: inviteErr.status, message: inviteErr.message },
+        throttleKey: `crm.invite_deferred.${inviteErr.code || "smtp"}`,
+      });
       onboardingStatus = "smtp_pending";
     }
   } catch (err) {
-    console.warn("[convertLead] SMTP dispatch error handled gracefully:", err);
+    logSanitizedOperationalEvent({
+      level: "warn",
+      scope: "crm.convert_lead",
+      action: "auth_invite_error",
+      message: "Auth invitation dispatch error handled gracefully",
+      metadata: err,
+      throttleKey: "crm.invite_error",
+    });
     onboardingStatus = "smtp_pending";
   }
 
@@ -238,7 +265,13 @@ export async function convertLeadToClientAction(formData: FormData) {
       },
     });
   } catch (auditErr) {
-    console.warn("[convertLead] Audit trail warning:", auditErr);
+    logSanitizedOperationalEvent({
+      level: "warn",
+      scope: "crm.convert_lead",
+      action: "audit_warning",
+      message: "Failed to write lead conversion audit event",
+      metadata: auditErr,
+    });
   }
 
   revalidatePath("/admin/leads");
@@ -283,7 +316,14 @@ export async function onboardOrganizationMemberAction(formData: FormData) {
       onboardingStatus = "invited";
     }
   } catch (err) {
-    console.warn("[onboardMember] SMTP dispatch error:", err);
+    logSanitizedOperationalEvent({
+      level: "warn",
+      scope: "crm.onboard_member",
+      action: "auth_invite_error",
+      message: "Auth member invitation dispatch error",
+      metadata: err,
+      throttleKey: "crm.onboard_member.invite_error",
+    });
     onboardingStatus = "smtp_pending";
   }
 
@@ -301,7 +341,13 @@ export async function onboardOrganizationMemberAction(formData: FormData) {
       },
     });
   } catch (err) {
-    console.warn("[onboardMember] Audit log warning:", err);
+    logSanitizedOperationalEvent({
+      level: "warn",
+      scope: "crm.onboard_member",
+      action: "audit_warning",
+      message: "Failed to write organization member invite audit event",
+      metadata: err,
+    });
   }
 
   await dispatchPlatformStaffNotifications({

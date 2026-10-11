@@ -14,6 +14,10 @@ import {
   dispatchPlatformStaffNotifications,
   dispatchUserNotification,
 } from "./notification-service";
+import {
+  logSanitizedOperationalEvent,
+  sanitizeOperationalString,
+} from "./platform-health-helper";
 
 export type WorkflowAutomationSweepSummary = {
   executedAt: string;
@@ -32,7 +36,9 @@ export type WorkflowAutomationSweepSummary = {
     duplicatesSuppressed: number;
     skippedByPreference: number;
     errors: number;
+    queryErrors?: number;
   };
+  queryErrors?: string[];
 };
 
 async function dispatchCandidate(
@@ -148,11 +154,38 @@ export async function runWorkflowAutomationSweep(params?: {
         .limit(50),
     ]);
 
-  const leads = leadsRes.data ?? [];
-  const tasks = tasksRes.data ?? [];
-  const invoices = invoicesRes.data ?? [];
-  const tickets = ticketsRes.data ?? [];
-  const invitations = invitationsRes.data ?? [];
+  const queryErrors: string[] = [];
+  if (leadsRes.error) {
+    queryErrors.push(
+      `leads: ${sanitizeOperationalString(leadsRes.error.code || leadsRes.error.message, 80)}`,
+    );
+  }
+  if (tasksRes.error) {
+    queryErrors.push(
+      `tasks: ${sanitizeOperationalString(tasksRes.error.code || tasksRes.error.message, 80)}`,
+    );
+  }
+  if (invoicesRes.error) {
+    queryErrors.push(
+      `invoices: ${sanitizeOperationalString(invoicesRes.error.code || invoicesRes.error.message, 80)}`,
+    );
+  }
+  if (ticketsRes.error) {
+    queryErrors.push(
+      `tickets: ${sanitizeOperationalString(ticketsRes.error.code || ticketsRes.error.message, 80)}`,
+    );
+  }
+  if (invitationsRes.error) {
+    queryErrors.push(
+      `invitations: ${sanitizeOperationalString(invitationsRes.error.code || invitationsRes.error.message, 80)}`,
+    );
+  }
+
+  const leads = leadsRes.error ? [] : (leadsRes.data ?? []);
+  const tasks = tasksRes.error ? [] : (tasksRes.data ?? []);
+  const invoices = invoicesRes.error ? [] : (invoicesRes.data ?? []);
+  const tickets = ticketsRes.error ? [] : (ticketsRes.data ?? []);
+  const invitations = invitationsRes.error ? [] : (invitationsRes.data ?? []);
 
   const candidates: AutomationReminderCandidate[] = [
     ...evaluateLeadFollowUpReminders(leads, now),
@@ -182,6 +215,23 @@ export async function runWorkflowAutomationSweep(params?: {
     }
   }
 
+  if (queryErrors.length > 0 || errors > 0) {
+    logSanitizedOperationalEvent({
+      level: "warn",
+      scope: "automation.sweep",
+      action: "partial_errors",
+      message: "Workflow automation sweep completed with partial errors",
+      metadata: {
+        triggeredBy,
+        dispatchErrors: errors,
+        queryErrorsCount: queryErrors.length,
+        queryErrors,
+      },
+      throttleKey: `automation.sweep.partial_errors:${queryErrors.length}:${errors > 0 ? 1 : 0}`,
+      now,
+    });
+  }
+
   const summary: WorkflowAutomationSweepSummary = {
     executedAt: now.toISOString(),
     triggeredBy,
@@ -199,7 +249,9 @@ export async function runWorkflowAutomationSweep(params?: {
       duplicatesSuppressed,
       skippedByPreference,
       errors,
+      queryErrors: queryErrors.length,
     },
+    ...(queryErrors.length > 0 ? { queryErrors } : {}),
   };
 
   try {
@@ -211,8 +263,16 @@ export async function runWorkflowAutomationSweep(params?: {
       target_id: summary.executedAt.slice(0, 10),
       details: summary,
     });
-  } catch {
-    // Non-fatal if audit log write fails
+  } catch (auditErr) {
+    logSanitizedOperationalEvent({
+      level: "warn",
+      scope: "automation.sweep",
+      action: "audit_insert_failed",
+      message: "Failed to record workflow automation sweep audit event",
+      metadata: auditErr,
+      throttleKey: "automation.sweep.audit_insert_failed",
+      now,
+    });
   }
 
   return summary;

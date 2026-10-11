@@ -7,6 +7,7 @@ import {
   resolveTransactionalEmailConfig,
   sanitizeEmailErrorMetadata,
 } from "./notification-helper";
+import { logSanitizedOperationalEvent } from "./platform-health-helper";
 
 export type { TransactionalEmailStatus };
 
@@ -154,23 +155,52 @@ export async function sendTransactionalEmail(params: {
         continue;
       }
 
+      const sanitizedErr = sanitizeEmailErrorMetadata({
+        code: `http_${response.status}`,
+        status: response.status,
+        message: `Transactional email provider responded with HTTP ${response.status}`,
+      });
+      logSanitizedOperationalEvent({
+        level: "warn",
+        scope: "communication.email",
+        action: "provider_http_error",
+        message: `Transactional email provider (${config.provider}) rejected delivery`,
+        metadata: {
+          provider: config.provider,
+          category: params.category,
+          status: response.status,
+          code: sanitizedErr.code,
+        },
+        throttleKey: `email.http_error.${config.provider}.${response.status}`,
+      });
+
       return {
         status: "failed",
         provider: config.provider,
-        error: sanitizeEmailErrorMetadata({
-          code: `http_${response.status}`,
-          status: response.status,
-          message: `Transactional email provider responded with HTTP ${response.status}`,
-        }),
+        error: sanitizedErr,
       };
     } catch (err) {
       if (attempt < maxAttempts) {
         continue;
       }
+      const sanitizedErr = sanitizeEmailErrorMetadata(err);
+      logSanitizedOperationalEvent({
+        level: "warn",
+        scope: "communication.email",
+        action: "provider_network_error",
+        message: `Transactional email provider (${config.provider}) request failed`,
+        metadata: {
+          provider: config.provider,
+          category: params.category,
+          code: sanitizedErr.code,
+          summary: sanitizedErr.summary,
+        },
+        throttleKey: `email.network_error.${config.provider}.${sanitizedErr.code}`,
+      });
       return {
         status: "failed",
         provider: config.provider,
-        error: sanitizeEmailErrorMetadata(err),
+        error: sanitizedErr,
       };
     }
   }

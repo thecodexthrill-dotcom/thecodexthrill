@@ -14,6 +14,7 @@ import {
   type TransactionalEmailStatus,
   sendTransactionalEmail,
 } from "./transactional-email";
+import { logSanitizedOperationalEvent } from "./platform-health-helper";
 
 export type NotificationDispatchOutcome = {
   userId: string;
@@ -121,6 +122,18 @@ export async function dispatchUserNotification(params: {
       });
 
     if (insertErr) {
+      logSanitizedOperationalEvent({
+        level: "warn",
+        scope: "notifications.dispatch",
+        action: "insert_error",
+        message: "Failed to persist in-app notification record",
+        metadata: {
+          category: sanitized.type,
+          code: insertErr.code,
+          message: insertErr.message,
+        },
+        throttleKey: `notifications.insert_error.${insertErr.code || "unknown"}`,
+      });
       return {
         userId: params.userId,
         inserted: false,
@@ -153,7 +166,15 @@ export async function dispatchUserNotification(params: {
       inserted: true,
       emailStatus,
     };
-  } catch {
+  } catch (err) {
+    logSanitizedOperationalEvent({
+      level: "warn",
+      scope: "notifications.dispatch",
+      action: "unexpected_error",
+      message: "Unexpected error during notification dispatch",
+      metadata: err,
+      throttleKey: "notifications.unexpected_error",
+    });
     return {
       userId: params.userId,
       inserted: false,

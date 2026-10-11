@@ -20,6 +20,7 @@ import {
   dispatchPlatformStaffNotifications,
   dispatchUserNotification,
 } from "@/lib/supabase/notification-service";
+import { logSanitizedOperationalEvent } from "@/lib/supabase/platform-health-helper";
 import { runWorkflowAutomationSweep } from "@/lib/supabase/workflow-automation";
 
 async function syncProjectTaskProgress(projectId: string) {
@@ -794,7 +795,17 @@ export async function createDocumentRecordAction(formData: FormData) {
       });
 
     if (uploadErr) {
-      console.error("Storage upload error:", uploadErr);
+      logSanitizedOperationalEvent({
+        level: "error",
+        scope: "delivery.documents",
+        action: "storage_upload_failed",
+        message: "Supabase Storage deliverable upload failed",
+        metadata: {
+          organizationId: organizationId.data,
+          message: uploadErr.message,
+        },
+        throttleKey: "delivery.storage_upload_failed",
+      });
       redirect(`${returnPath}?error=save`);
     }
 

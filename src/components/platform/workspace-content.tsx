@@ -5,7 +5,12 @@ import { InvitationRowActions } from "@/components/auth/invitation-row-actions";
 import { PlatformRoleActions } from "@/components/platform/platform-role-actions";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { invitationListFailureMessage, safeInvitationListErrorCode } from "@/lib/supabase/invitation-list-status";
+import {
+  logSanitizedOperationalEvent,
+  resolvePlatformIntegrationStatus,
+} from "@/lib/supabase/platform-health-helper";
 import { signOutAction } from "@/lib/supabase/actions";
 import {
   createLeadAction,
@@ -294,7 +299,15 @@ export async function WorkspaceContent({
       supabase.rpc("list_platform_invitations"),
       supabase.rpc("list_platform_users"),
     ]);
-    if (invitationError) console.error("[admin.team.invitations] list RPC failed", { code: safeInvitationListErrorCode(invitationError.code) });
+    if (invitationError) {
+      logSanitizedOperationalEvent({
+        level: "error",
+        scope: "admin.team",
+        action: "list_platform_invitations",
+        message: "Invitation list RPC failed",
+        metadata: { code: safeInvitationListErrorCode(invitationError.code) },
+      });
+    }
     const invitations = (invitationData ?? []) as { id: string; email: string; role: string; status: string; created_at: string; expires_at: string; auth_user_id: string | null; resend_count: number; last_resent_at: string | null; archived_at: string | null }[];
     const users = (userData ?? []) as { user_id: string; email: string; display_name: string | null; roles: string[]; created_at: string; email_confirmed: boolean }[];
     const canAssignPlatformAdmin = roles.includes("super_admin");
@@ -957,45 +970,129 @@ export async function WorkspaceContent({
 
   if (kind === "admin" && key === "analytics") {
     const supabase = await createClient();
+    const canReadExecutiveTelemetry = roles.some(
+      (role) => role === "super_admin" || role === "platform_admin"
+    );
+    let telemetryClient = supabase;
+    if (canReadExecutiveTelemetry) {
+      try {
+        telemetryClient = createAdminClient();
+      } catch {
+        telemetryClient = supabase;
+      }
+    }
+
     const [
       leadsResult,
       orgsResult,
+      membershipsResult,
       usersResult,
       invitesResult,
       projectsResult,
       tasksResult,
       invoicesResult,
       ticketsResult,
+      automationEventsResult,
+      notificationsResult,
     ] = await Promise.all([
-      supabase.from("platform_sales_leads").select("stage, created_at, source"),
-      supabase.from("organizations").select("status, created_at, name"),
+      supabase
+        .from("platform_sales_leads")
+        .select("id, stage, source, follow_up_at, created_at")
+        .order("created_at", { ascending: false })
+        .limit(2000),
+      supabase
+        .from("organizations")
+        .select("id, status, created_at, name")
+        .order("created_at", { ascending: false })
+        .limit(1000),
+      telemetryClient
+        .from("organization_memberships")
+        .select("organization_id, user_id, status, created_at")
+        .order("created_at", { ascending: false })
+        .limit(3000),
       supabase.rpc("list_platform_users"),
       supabase.rpc("list_platform_invitations"),
-      supabase.from("tenant_projects").select("status, progress_pct, created_at, name"),
-      supabase.from("tenant_tasks").select("status, priority, created_at"),
-      supabase.from("tenant_invoices").select("amount_cents, status, currency, due_date, paid_at, created_at, items"),
-      supabase.from("support_tickets").select("status, priority, category, created_at"),
+      supabase
+        .from("tenant_projects")
+        .select("id, name, status, progress_pct, target_date, created_at")
+        .order("created_at", { ascending: false })
+        .limit(1000),
+      supabase
+        .from("tenant_tasks")
+        .select("id, title, status, priority, assigned_to, due_date, created_at")
+        .order("created_at", { ascending: false })
+        .limit(3000),
+      supabase
+        .from("tenant_invoices")
+        .select("id, invoice_number, amount_cents, status, currency, due_date, paid_at, created_at, items")
+        .order("created_at", { ascending: false })
+        .limit(2000),
+      supabase
+        .from("support_tickets")
+        .select("id, ticket_number, title, status, priority, category, assigned_to, resolved_at, created_at")
+        .order("created_at", { ascending: false })
+        .limit(2000),
+      telemetryClient
+        .from("audit_events")
+        .select("id, occurred_at, action, details")
+        .eq("scope", "platform")
+        .in("action", ["workflow.automation_sweep", "workflow.automation_failed"])
+        .order("occurred_at", { ascending: false })
+        .limit(50),
+      telemetryClient
+        .from("user_notifications")
+        .select("id, type, is_read, created_at")
+        .order("created_at", { ascending: false })
+        .limit(1000),
     ]);
 
     const queryErrors: string[] = [];
     if (leadsResult.error) queryErrors.push(`Leads: ${leadsResult.error.message}`);
     if (orgsResult.error) queryErrors.push(`Organizations: ${orgsResult.error.message}`);
+    if (membershipsResult.error) queryErrors.push(`Client Memberships: ${membershipsResult.error.message}`);
     if (usersResult.error) queryErrors.push(`Staff Directory: ${usersResult.error.message}`);
     if (invitesResult.error) queryErrors.push(`Invitations: ${invitesResult.error.message}`);
     if (projectsResult.error) queryErrors.push(`Projects: ${projectsResult.error.message}`);
     if (tasksResult.error) queryErrors.push(`Tasks: ${tasksResult.error.message}`);
     if (invoicesResult.error) queryErrors.push(`Invoices & Billing: ${invoicesResult.error.message}`);
     if (ticketsResult.error) queryErrors.push(`Support Tickets: ${ticketsResult.error.message}`);
+    if (automationEventsResult.error) queryErrors.push(`Automation Health: ${automationEventsResult.error.message}`);
+    if (notificationsResult.error) queryErrors.push(`Notifications: ${notificationsResult.error.message}`);
+
+    if (queryErrors.length > 0) {
+      logSanitizedOperationalEvent({
+        level: "warn",
+        scope: "admin.analytics",
+        action: "load_executive_dashboard",
+        message: "One or more executive analytics queries returned an error",
+        metadata: { errorCount: queryErrors.length, errors: queryErrors },
+      });
+    }
+
+    const invitesList = invitesResult.error
+      ? null
+      : ((invitesResult.data ?? []) as NonNullable<AnalyticsData["invitations"]>);
 
     const analyticsData: AnalyticsData = {
       leads: leadsResult.error ? null : ((leadsResult.data ?? []) as NonNullable<AnalyticsData["leads"]>),
       organizations: orgsResult.error ? null : ((orgsResult.data ?? []) as NonNullable<AnalyticsData["organizations"]>),
+      memberships: membershipsResult.error
+        ? null
+        : ((membershipsResult.data ?? []) as NonNullable<AnalyticsData["memberships"]>),
       staffCount: usersResult.error ? null : ((usersResult.data ?? []) as unknown[]).length,
-      pendingInvitesCount: invitesResult.error ? null : ((invitesResult.data ?? []) as { status: string }[]).filter((i) => i.status === "pending").length,
+      pendingInvitesCount: invitesList ? invitesList.filter((i) => i.status === "pending").length : null,
+      invitations: invitesList,
       projects: projectsResult.error ? null : ((projectsResult.data ?? []) as NonNullable<AnalyticsData["projects"]>),
       tasks: tasksResult.error ? null : ((tasksResult.data ?? []) as NonNullable<AnalyticsData["tasks"]>),
       invoices: invoicesResult.error ? null : ((invoicesResult.data ?? []) as NonNullable<AnalyticsData["invoices"]>),
       tickets: ticketsResult.error ? null : ((ticketsResult.data ?? []) as NonNullable<AnalyticsData["tickets"]>),
+      automationAuditEvents: automationEventsResult.error
+        ? null
+        : ((automationEventsResult.data ?? []) as NonNullable<AnalyticsData["automationAuditEvents"]>),
+      notifications: notificationsResult.error
+        ? null
+        : ((notificationsResult.data ?? []) as NonNullable<AnalyticsData["notifications"]>),
+      integrationStatus: resolvePlatformIntegrationStatus(process.env),
       queryErrors: queryErrors.length > 0 ? queryErrors : undefined,
     };
 
@@ -1010,6 +1107,22 @@ export async function WorkspaceContent({
     ]);
 
     const currentAal = assurance?.currentLevel ?? "aal1";
+    const canViewPlatformHealth =
+      kind === "admin" && roles.some((role) => role === "super_admin" || role === "platform_admin");
+    const integrationStatus = canViewPlatformHealth
+      ? resolvePlatformIntegrationStatus(process.env)
+      : null;
+    const integrationItems = integrationStatus
+      ? [
+          integrationStatus.supabaseCloud,
+          integrationStatus.transactionalEmail,
+          integrationStatus.authSmtp,
+          integrationStatus.workflowScheduler,
+          integrationStatus.webPush,
+          integrationStatus.storageBucket,
+        ]
+      : [];
+
     return <div className="workspace-content">
       <section className="module-panel">
         <p className="eyebrow">ACCOUNT &amp; ENVIRONMENT</p>
@@ -1030,6 +1143,43 @@ export async function WorkspaceContent({
           <form action={signOutAction}><button className="button button-secondary" type="submit">Sign out</button></form>
         </div>
       </section>
+
+      {integrationStatus && (
+        <section className="module-panel">
+          <p className="eyebrow">PLATFORM HEALTH · CONFIGURATION PRESENCE ONLY</p>
+          <h2>Configured vs. unavailable integrations</h2>
+          <p>
+            Displays live environment configuration readiness without exposing secret keys, tokens, or credentials.
+            {" "}({integrationStatus.configuredCount} of {integrationStatus.totalIntegrations} integrations configured)
+          </p>
+          <div className="module-table-wrap" style={{ marginTop: "14px" }}>
+            <table className="module-table">
+              <thead>
+                <tr>
+                  <th>Integration</th>
+                  <th>Provider</th>
+                  <th>Status</th>
+                  <th>Safe configuration summary</th>
+                </tr>
+              </thead>
+              <tbody>
+                {integrationItems.map((item) => (
+                  <tr key={item.id}>
+                    <td><strong>{item.name}</strong></td>
+                    <td>{item.providerLabel}</td>
+                    <td>
+                      <span className="record-status" style={{ textTransform: "uppercase" }}>
+                        {item.statusLabel}
+                      </span>
+                    </td>
+                    <td>{item.summary}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
 
       <section className="module-panel">
         <h2>Security policies</h2>
