@@ -2,10 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   classifyAccountDiagnostics,
+  deriveMfaSummary,
   evaluateDeletionDependencies,
   filterAndPaginateDirectoryUsers,
   formatExpectedDeleteConfirmation,
   isValidUuid,
+  matchesConfirmationEmail,
   matchesDeleteConfirmationPhrase,
   resolveUserAccessStatus,
   validatePermanentUserDeletionRequest,
@@ -200,10 +202,42 @@ test("rejects invalid UUIDs and mismatched confirmation inputs", () => {
     formatExpectedDeleteConfirmation(targetEmail),
     "DELETE phase5.alpha.test@example.com",
   );
+  assert.equal(matchesConfirmationEmail(targetEmail, targetEmail), true);
+  assert.equal(matchesConfirmationEmail(targetEmail, "wrong@example.com"), false);
   assert.equal(
     matchesDeleteConfirmationPhrase(targetEmail, `DELETE ${targetEmail}`),
     true,
   );
+  // Bare email without "DELETE " prefix must be rejected in Step 2
+  assert.equal(
+    matchesDeleteConfirmationPhrase(targetEmail, targetEmail),
+    false,
+  );
+});
+
+test("derives MFA status accurately when factors are undefined, empty, unverified, or verified TOTP", () => {
+  // listUsers() omits factors (undefined) — must return unavailable, not no_mfa
+  const missingFactors = deriveMfaSummary(undefined);
+  assert.equal(missingFactors.mfaStatus, "unavailable");
+  assert.equal(missingFactors.verifiedTotpCount, 0);
+
+  const emptyFactors = deriveMfaSummary([]);
+  assert.equal(emptyFactors.mfaStatus, "no_mfa");
+  assert.equal(emptyFactors.verifiedTotpCount, 0);
+
+  const unverifiedFactor = deriveMfaSummary([
+    { factor_type: "totp", status: "unverified" },
+  ]);
+  assert.equal(unverifiedFactor.mfaStatus, "unverified_factor");
+  assert.equal(unverifiedFactor.verifiedTotpCount, 0);
+  assert.equal(unverifiedFactor.totalFactorCount, 1);
+
+  const verifiedTotp = deriveMfaSummary([
+    { factor_type: "totp", status: "verified" },
+  ]);
+  assert.equal(verifiedTotp.mfaStatus, "verified_totp");
+  assert.equal(verifiedTotp.verifiedTotpCount, 1);
+  assert.equal(verifiedTotp.totalFactorCount, 1);
 });
 
 test("blocks permanent deletion when critical non-nullable business or audit dependencies exist", () => {
@@ -375,6 +409,8 @@ test("filters and paginates directory users by search, role, diagnostic category
       emailConfirmedAt: "2026-10-04T07:55:19Z",
       isSuperAdmin: true,
       isProtectedOwner: true,
+      isCurrentSessionUser: true,
+      currentSessionAal: "aal2",
       platformRoles: ["super_admin"],
       revokedPlatformRoles: [],
       organizations: [],
@@ -412,6 +448,8 @@ test("filters and paginates directory users by search, role, diagnostic category
       emailConfirmedAt: "2026-10-10T16:23:55Z",
       isSuperAdmin: false,
       isProtectedOwner: false,
+      isCurrentSessionUser: false,
+      currentSessionAal: null,
       platformRoles: [],
       revokedPlatformRoles: [],
       organizations: [],

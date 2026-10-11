@@ -44,6 +44,8 @@ export interface SuperAdminDirectoryUser {
   emailConfirmedAt: string | null;
   isSuperAdmin: boolean;
   isProtectedOwner: boolean;
+  isCurrentSessionUser: boolean;
+  currentSessionAal: "aal1" | "aal2" | null;
   platformRoles: string[];
   revokedPlatformRoles: string[];
   organizations: UserOrganizationMembershipSummary[];
@@ -121,17 +123,67 @@ export function formatExpectedDeleteConfirmation(email: string): string {
   return `DELETE ${email.trim().toLowerCase()}`;
 }
 
+export function matchesConfirmationEmail(
+  targetEmail: string,
+  confirmationEmail: string,
+): boolean {
+  const normalizedTarget = targetEmail.trim().toLowerCase();
+  const normalizedInput = confirmationEmail.trim().toLowerCase();
+  if (!normalizedTarget || !normalizedInput) return false;
+  return normalizedTarget === normalizedInput;
+}
+
+/**
+ * Step 2 confirmation check: must match `DELETE <exact-email>` (case-insensitive email,
+ * mandatory `DELETE ` prefix). Bare email without `DELETE ` is rejected.
+ */
 export function matchesDeleteConfirmationPhrase(
   email: string,
   typedConfirmation: string,
 ): boolean {
   const normalizedEmail = email.trim().toLowerCase();
-  const normalizedTyped = typedConfirmation.trim().toLowerCase();
-  if (!normalizedEmail || !normalizedTyped) return false;
-  return (
-    normalizedTyped === `delete ${normalizedEmail}` ||
-    normalizedTyped === normalizedEmail
-  );
+  const trimmedTyped = typedConfirmation.trim();
+  if (!normalizedEmail || !trimmedTyped) return false;
+  if (!trimmedTyped.startsWith("DELETE ")) return false;
+  const typedEmailPart = trimmedTyped.slice("DELETE ".length).trim().toLowerCase();
+  return typedEmailPart === normalizedEmail;
+}
+
+/**
+ * Derives MFA factor enrollment status from an explicit factor list.
+ * IMPORTANT: `admin.auth.admin.listUsers()` omits `factors` (`undefined`).
+ * When `factors` is `undefined` or `null`, return `"unavailable"` rather than
+ * falsely reporting `"no_mfa"`.
+ */
+export function deriveMfaSummary(
+  factors: Array<{ factor_type?: string; status?: string }> | null | undefined,
+): {
+  mfaStatus: UserMfaSummaryStatus;
+  verifiedTotpCount: number;
+  totalFactorCount: number;
+} {
+  if (!Array.isArray(factors)) {
+    return {
+      mfaStatus: "unavailable",
+      verifiedTotpCount: 0,
+      totalFactorCount: 0,
+    };
+  }
+  const verifiedTotpCount = factors.filter(
+    (f) => f.factor_type === "totp" && f.status === "verified",
+  ).length;
+  const totalFactorCount = factors.length;
+  if (verifiedTotpCount > 0) {
+    return { mfaStatus: "verified_totp", verifiedTotpCount, totalFactorCount };
+  }
+  if (totalFactorCount > 0) {
+    return {
+      mfaStatus: "unverified_factor",
+      verifiedTotpCount: 0,
+      totalFactorCount,
+    };
+  }
+  return { mfaStatus: "no_mfa", verifiedTotpCount: 0, totalFactorCount: 0 };
 }
 
 /**
@@ -444,13 +496,11 @@ export function validatePermanentUserDeletionRequest(input: {
     };
   }
 
-  const normalizedTargetEmail = input.targetEmail.trim().toLowerCase();
-  const normalizedConfirmationEmail = input.confirmationEmail.trim().toLowerCase();
-  if (!normalizedTargetEmail || normalizedTargetEmail !== normalizedConfirmationEmail) {
+  if (!matchesConfirmationEmail(input.targetEmail, input.confirmationEmail)) {
     return {
       allowed: false,
       code: "confirmation_email_mismatch",
-      error: "The confirmation email does not match the selected user's email address.",
+      error: "Step 1 confirmation email does not match the selected user's exact email address.",
       ...emptyLists,
     };
   }
@@ -459,7 +509,7 @@ export function validatePermanentUserDeletionRequest(input: {
     return {
       allowed: false,
       code: "typed_confirmation_mismatch",
-      error: `Type "${formatExpectedDeleteConfirmation(input.targetEmail)}" to confirm permanent deletion.`,
+      error: `Step 2 confirmation must match "${formatExpectedDeleteConfirmation(input.targetEmail)}" exactly.`,
       ...emptyLists,
     };
   }
@@ -591,4 +641,3 @@ export function filterAndPaginateDirectoryUsers(
     totalPages,
   };
 }
-

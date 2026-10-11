@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useMemo, useState, useTransition } from "react";
+import { type FormEvent, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { PlatformRoleActions } from "@/components/platform/platform-role-actions";
 import {
@@ -8,11 +8,11 @@ import {
   refreshUserDirectoryAction,
   restoreUserAccessAction,
   revokeUserAccessAction,
-  type AuthActionState,
 } from "@/lib/supabase/actions";
 import {
   filterAndPaginateDirectoryUsers,
   formatExpectedDeleteConfirmation,
+  matchesConfirmationEmail,
   matchesDeleteConfirmationPhrase,
   type SuperAdminDirectoryUser,
   type UserAccessStatus,
@@ -20,77 +20,93 @@ import {
   type UserMfaSummaryStatus,
 } from "@/lib/supabase/user-management-helper";
 
-const initialActionState: AuthActionState = {};
+type AccessOverride = {
+  accessStatus: UserAccessStatus;
+  isBanned: boolean;
+  accessRevokedAt: string | null;
+  canRevokeAccess: boolean;
+  canRestoreAccess: boolean;
+  platformRoles?: string[];
+  revokedPlatformRoles?: string[];
+};
 
-function formatAccessStatusLabel(status: UserAccessStatus): {
+function formatAccessStatusBadge(status: UserAccessStatus): {
   label: string;
-  tone: "gold" | "green" | "red" | "muted";
+  badgeClass: string;
 } {
   switch (status) {
     case "protected_owner":
-      return { label: "Protected Owner", tone: "gold" };
+      return { label: "Protected Owner", badgeClass: "um-badge um-badge-gold" };
     case "active":
-      return { label: "Active Access", tone: "green" };
+      return { label: "Active Access", badgeClass: "um-badge um-badge-green" };
     case "disabled":
-      return { label: "Disabled / Revoked", tone: "red" };
+      return { label: "Disabled / Revoked", badgeClass: "um-badge um-badge-red" };
     case "pending_verification":
-      return { label: "Pending Verification", tone: "muted" };
+      return { label: "Pending Verification", badgeClass: "um-badge um-badge-amber" };
     case "no_workspace_role":
-      return { label: "No Active Role", tone: "muted" };
+      return { label: "No Active Role", badgeClass: "um-badge um-badge-muted" };
   }
 }
 
 function formatDiagnosticBadge(category: UserDiagnosticCategory): {
   label: string;
-  color: string;
-  border: string;
-  bg: string;
+  badgeClass: string;
 } {
   switch (category) {
     case "real_or_active_account":
       return {
-        label: "Verified / Active Account",
-        color: "#6ee7b7",
-        border: "rgba(16, 185, 129, 0.35)",
-        bg: "rgba(16, 185, 129, 0.12)",
+        label: "Verified Account",
+        badgeClass: "um-badge um-badge-green",
       };
     case "confirmed_test_account":
       return {
-        label: "Acceptance-Test Artifact",
-        color: "#fcd34d",
-        border: "rgba(245, 158, 11, 0.4)",
-        bg: "rgba(245, 158, 11, 0.12)",
+        label: "Test Artifact",
+        badgeClass: "um-badge um-badge-amber",
       };
     case "unknown_unassigned_account":
       return {
-        label: "Unassigned / Review",
-        color: "#93c5fd",
-        border: "rgba(59, 130, 246, 0.35)",
-        bg: "rgba(59, 130, 246, 0.12)",
+        label: "Needs Review",
+        badgeClass: "um-badge um-badge-muted",
       };
   }
 }
 
-function formatMfaLabel(user: SuperAdminDirectoryUser): {
+function formatMfaBadge(user: SuperAdminDirectoryUser): {
   label: string;
-  verified: boolean;
+  badgeClass: string;
 } {
   if (user.mfaStatus === "verified_totp") {
     return {
-      label: `Verified TOTP (${user.verifiedTotpCount})`,
-      verified: true,
+      label: `MFA: Verified TOTP (${user.verifiedTotpCount})`,
+      badgeClass: "um-badge um-badge-green",
     };
   }
   if (user.mfaStatus === "unverified_factor") {
     return {
-      label: `Unverified Factor (${user.totalFactorCount})`,
-      verified: false,
+      label: `MFA: Unverified Factor (${user.totalFactorCount})`,
+      badgeClass: "um-badge um-badge-amber",
     };
   }
   if (user.mfaStatus === "unavailable") {
-    return { label: "Unavailable", verified: false };
+    return {
+      label: "MFA: Status Unavailable",
+      badgeClass: "um-badge um-badge-muted",
+    };
   }
-  return { label: "No MFA Enrolled", verified: false };
+  return {
+    label: "MFA: No Factor Enrolled",
+    badgeClass: "um-badge um-badge-muted",
+  };
+}
+
+function formatShortTimestamp(iso: string | null): string {
+  if (!iso) return "Never signed in";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return `${d.toLocaleDateString()} ${d.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  })}`;
 }
 
 export function UserManagementDirectory({
@@ -108,9 +124,21 @@ export function UserManagementDirectory({
   const [isRefreshing, startRefreshTransition] = useTransition();
   const [lastRefreshedAt, setLastRefreshedAt] = useState<string | null>(null);
 
+  // Optimistic / verified client state overrides so deletions & revocations reflect immediately
+  const [deletedUserIds, setDeletedUserIds] = useState<string[]>([]);
+  const [accessOverrides, setAccessOverrides] = useState<
+    Record<string, AccessOverride>
+  >({});
+  const [actionBanner, setActionBanner] = useState<{
+    type: "success" | "error";
+    text: string;
+  } | null>(null);
+
   // Filters & Pagination
   const [search, setSearch] = useState("");
-  const [accessStatus, setAccessStatus] = useState<"all" | UserAccessStatus>("all");
+  const [accessStatus, setAccessStatus] = useState<"all" | UserAccessStatus>(
+    "all",
+  );
   const [roleFilter, setRoleFilter] = useState<
     | "all"
     | "super_admin"
@@ -123,60 +151,51 @@ export function UserManagementDirectory({
   const [diagnosticFilter, setDiagnosticFilter] = useState<
     "all" | UserDiagnosticCategory
   >("all");
-  const [mfaFilter, setMfaFilter] = useState<"all" | UserMfaSummaryStatus>("all");
+  const [mfaFilter, setMfaFilter] = useState<"all" | UserMfaSummaryStatus>(
+    "all",
+  );
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
 
-  // Modal state for Revoke Access / Restore Access / Permanent Delete
-  const [revokeTarget, setRevokeTarget] = useState<SuperAdminDirectoryUser | null>(
-    null,
-  );
+  // Modal state & submission states
+  const [revokeTarget, setRevokeTarget] =
+    useState<SuperAdminDirectoryUser | null>(null);
   const [revokeReason, setRevokeReason] = useState("");
+  const [isRevoking, setIsRevoking] = useState(false);
+
   const [restoreTarget, setRestoreTarget] =
     useState<SuperAdminDirectoryUser | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<SuperAdminDirectoryUser | null>(
-    null,
-  );
+  const [isRestoring, setIsRestoring] = useState(false);
+
+  const [deleteTarget, setDeleteTarget] =
+    useState<SuperAdminDirectoryUser | null>(null);
   const [confirmationEmail, setConfirmationEmail] = useState("");
   const [typedConfirmation, setTypedConfirmation] = useState("");
+  const [isDeleting, setIsDeleting] = useState(false);
 
-  const [revokeState, revokeAction, revokePending] = useActionState(
-    revokeUserAccessAction,
-    initialActionState,
-  );
-  const [restoreState, restoreAction, restorePending] = useActionState(
-    restoreUserAccessAction,
-    initialActionState,
-  );
-  const [deleteState, deleteAction, deletePending] = useActionState(
-    permanentlyDeleteUserAction,
-    initialActionState,
-  );
+  const [modalError, setModalError] = useState<string | null>(null);
 
-  // Close modal and refresh when action succeeds
-  useEffect(() => {
-    if (revokeState.message) {
-      setRevokeTarget(null);
-      setRevokeReason("");
-      router.refresh();
-    }
-  }, [revokeState.message, router]);
-
-  useEffect(() => {
-    if (restoreState.message) {
-      setRestoreTarget(null);
-      router.refresh();
-    }
-  }, [restoreState.message, router]);
-
-  useEffect(() => {
-    if (deleteState.message) {
-      setDeleteTarget(null);
-      setConfirmationEmail("");
-      setTypedConfirmation("");
-      router.refresh();
-    }
-  }, [deleteState.message, router]);
+  // Effective directory users after applying verified local deletions/revocations
+  const effectiveUsers = useMemo(() => {
+    const deletedSet = new Set(deletedUserIds);
+    return users
+      .filter((u) => !deletedSet.has(u.userId))
+      .map((u) => {
+        const override = accessOverrides[u.userId];
+        if (!override) return u;
+        return {
+          ...u,
+          accessStatus: override.accessStatus,
+          isBanned: override.isBanned,
+          accessRevokedAt: override.accessRevokedAt,
+          canRevokeAccess: override.canRevokeAccess,
+          canRestoreAccess: override.canRestoreAccess,
+          platformRoles: override.platformRoles ?? u.platformRoles,
+          revokedPlatformRoles:
+            override.revokedPlatformRoles ?? u.revokedPlatformRoles,
+        };
+      });
+  }, [users, deletedUserIds, accessOverrides]);
 
   const counts = useMemo(() => {
     let realOrActive = 0;
@@ -184,7 +203,7 @@ export function UserManagementDirectory({
     let unknownUnassigned = 0;
     let disabledCount = 0;
     let verifiedMfaCount = 0;
-    for (const u of users) {
+    for (const u of effectiveUsers) {
       if (u.diagnosticCategory === "real_or_active_account") realOrActive += 1;
       if (u.diagnosticCategory === "confirmed_test_account") confirmedTest += 1;
       if (u.diagnosticCategory === "unknown_unassigned_account")
@@ -193,18 +212,18 @@ export function UserManagementDirectory({
       if (u.mfaStatus === "verified_totp") verifiedMfaCount += 1;
     }
     return {
-      total: users.length,
+      total: effectiveUsers.length,
       realOrActive,
       confirmedTest,
       unknownUnassigned,
       disabledCount,
       verifiedMfaCount,
     };
-  }, [users]);
+  }, [effectiveUsers]);
 
   const pagination = useMemo(
     () =>
-      filterAndPaginateDirectoryUsers(users, {
+      filterAndPaginateDirectoryUsers(effectiveUsers, {
         search,
         accessStatus,
         roleFilter,
@@ -214,7 +233,7 @@ export function UserManagementDirectory({
         pageSize,
       }),
     [
-      users,
+      effectiveUsers,
       search,
       accessStatus,
       roleFilter,
@@ -224,6 +243,21 @@ export function UserManagementDirectory({
       pageSize,
     ],
   );
+
+  const step1EmailMatched = useMemo(() => {
+    if (!deleteTarget) return false;
+    return matchesConfirmationEmail(deleteTarget.email, confirmationEmail);
+  }, [deleteTarget, confirmationEmail]);
+
+  const step2PhraseMatched = useMemo(() => {
+    if (!deleteTarget) return false;
+    return matchesDeleteConfirmationPhrase(
+      deleteTarget.email,
+      typedConfirmation,
+    );
+  }, [deleteTarget, typedConfirmation]);
+
+  const isDeleteConfirmationReady = step1EmailMatched && step2PhraseMatched;
 
   const handleRefresh = () => {
     startRefreshTransition(async () => {
@@ -242,120 +276,309 @@ export function UserManagementDirectory({
     setPage(1);
   };
 
-  const isDeleteConfirmationReady = useMemo(() => {
-    if (!deleteTarget) return false;
-    const emailMatches =
-      confirmationEmail.trim().toLowerCase() ===
-      deleteTarget.email.trim().toLowerCase();
-    const phraseMatches = matchesDeleteConfirmationPhrase(
-      deleteTarget.email,
-      typedConfirmation,
-    );
-    return emailMatches && phraseMatches;
-  }, [deleteTarget, confirmationEmail, typedConfirmation]);
+  const openRevokeModal = (u: SuperAdminDirectoryUser) => {
+    setModalError(null);
+    setRevokeReason("");
+    setRevokeTarget(u);
+  };
+
+  const closeRevokeModal = () => {
+    if (isRevoking) return;
+    setModalError(null);
+    setRevokeReason("");
+    setRevokeTarget(null);
+  };
+
+  const openRestoreModal = (u: SuperAdminDirectoryUser) => {
+    setModalError(null);
+    setRestoreTarget(u);
+  };
+
+  const closeRestoreModal = () => {
+    if (isRestoring) return;
+    setModalError(null);
+    setRestoreTarget(null);
+  };
+
+  const openDeleteModal = (u: SuperAdminDirectoryUser) => {
+    setModalError(null);
+    setConfirmationEmail("");
+    setTypedConfirmation("");
+    setDeleteTarget(u);
+  };
+
+  const closeDeleteModal = () => {
+    if (isDeleting) return;
+    setModalError(null);
+    setConfirmationEmail("");
+    setTypedConfirmation("");
+    setDeleteTarget(null);
+  };
+
+  const handleRevokeSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!revokeTarget || isRevoking) return;
+    setModalError(null);
+    setIsRevoking(true);
+
+    try {
+      const formData = new FormData();
+      formData.set("target-user-id", revokeTarget.userId);
+      formData.set("reason", revokeReason.trim());
+
+      const result = await revokeUserAccessAction({}, formData);
+      if (result.error) {
+        setModalError(result.error);
+        return;
+      }
+
+      const targetId = result.revokedUserId ?? revokeTarget.userId;
+      setAccessOverrides((prev) => ({
+        ...prev,
+        [targetId]: {
+          accessStatus: "disabled",
+          isBanned: true,
+          accessRevokedAt: new Date().toISOString(),
+          canRevokeAccess: false,
+          canRestoreAccess: true,
+          platformRoles: [],
+          revokedPlatformRoles: Array.from(
+            new Set([
+              ...revokeTarget.revokedPlatformRoles,
+              ...revokeTarget.platformRoles,
+            ]),
+          ),
+        },
+      }));
+      setActionBanner({
+        type: "success",
+        text:
+          result.message ??
+          `Access revoked and account disabled for ${revokeTarget.email}.`,
+      });
+      setRevokeTarget(null);
+      setRevokeReason("");
+      router.refresh();
+    } catch {
+      setModalError(
+        "Unable to complete the access revocation request. Verify your network connection and AAL2 session.",
+      );
+    } finally {
+      setIsRevoking(false);
+    }
+  };
+
+  const handleRestoreSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!restoreTarget || isRestoring) return;
+    setModalError(null);
+    setIsRestoring(true);
+
+    try {
+      const formData = new FormData();
+      formData.set("target-user-id", restoreTarget.userId);
+
+      const result = await restoreUserAccessAction({}, formData);
+      if (result.error) {
+        setModalError(result.error);
+        return;
+      }
+
+      const targetId = result.restoredUserId ?? restoreTarget.userId;
+      const nextStatus: UserAccessStatus = !restoreTarget.emailConfirmedAt
+        ? "pending_verification"
+        : restoreTarget.platformRoles.length > 0 ||
+            restoreTarget.organizations.some(
+              (o) => o.membershipStatus === "active",
+            )
+          ? "active"
+          : "no_workspace_role";
+
+      setAccessOverrides((prev) => ({
+        ...prev,
+        [targetId]: {
+          accessStatus: nextStatus,
+          isBanned: false,
+          accessRevokedAt: null,
+          canRevokeAccess: true,
+          canRestoreAccess: false,
+        },
+      }));
+      setActionBanner({
+        type: "success",
+        text:
+          result.message ??
+          `Sign-in ban removed for ${restoreTarget.email}.`,
+      });
+      setRestoreTarget(null);
+      router.refresh();
+    } catch {
+      setModalError(
+        "Unable to complete the access restoration request. Verify your network connection and AAL2 session.",
+      );
+    } finally {
+      setIsRestoring(false);
+    }
+  };
+
+  const handlePermanentDeleteSubmit = async (
+    event: FormEvent<HTMLFormElement>,
+  ) => {
+    event.preventDefault();
+    if (!deleteTarget || isDeleting) return;
+
+    if (!step1EmailMatched) {
+      setModalError(
+        `Step 1 failed: Enter the exact email address (${deleteTarget.email}).`,
+      );
+      return;
+    }
+
+    if (!step2PhraseMatched) {
+      setModalError(
+        `Step 2 failed: Type ${formatExpectedDeleteConfirmation(deleteTarget.email)} exactly.`,
+      );
+      return;
+    }
+
+    setModalError(null);
+    setIsDeleting(true);
+
+    try {
+      const formData = new FormData();
+      formData.set("target-user-id", deleteTarget.userId);
+      formData.set("confirmation-email", confirmationEmail.trim());
+      formData.set("typed-confirmation", typedConfirmation.trim());
+
+      const result = await permanentlyDeleteUserAction({}, formData);
+      if (result.error) {
+        setModalError(result.error);
+        return;
+      }
+
+      const removedId = result.deletedUserId ?? deleteTarget.userId;
+      setDeletedUserIds((prev) =>
+        prev.includes(removedId) ? prev : [...prev, removedId],
+      );
+      setActionBanner({
+        type: "success",
+        text:
+          result.message ??
+          `Permanently deleted ${deleteTarget.email} from Supabase Auth.`,
+      });
+      setDeleteTarget(null);
+      setConfirmationEmail("");
+      setTypedConfirmation("");
+      router.refresh();
+    } catch {
+      setModalError(
+        "Permanent deletion request failed before completion. Verify your AAL2 session and try again.",
+      );
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   return (
-    <section className="module-panel">
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "flex-start",
-          flexWrap: "wrap",
-          gap: "12px",
-          marginBottom: "16px",
-        }}
-      >
-        <div>
+    <section className="module-panel um-panel">
+      {/* Section Header */}
+      <div className="um-header">
+        <div className="um-header-copy">
           <p className="eyebrow">SUPER ADMIN IDENTITY &amp; ACCESS GOVERNANCE</p>
-          <h2 style={{ margin: "4px 0 6px" }}>
-            Supabase Auth &amp; Platform User Directory
-          </h2>
-          <p style={{ margin: 0, maxWidth: "78ch" }}>
-            Complete inventory of Supabase Auth accounts, global platform roles,
-            client organization memberships, MFA posture, and diagnostic
-            account classification. Access revocation disables workspace login
-            while preserving records; permanent deletion removes the Supabase
-            Auth user and requires verified Super Admin MFA (AAL2).
+          <h2>Supabase Auth &amp; Platform User Directory</h2>
+          <p>
+            Live inventory of Supabase Auth accounts, global platform roles,
+            client organization memberships, and MFA posture. Access revocation
+            blocks sign-in while preserving historical records; permanent
+            deletion removes the Supabase Auth identity and requires an active
+            Super Admin MFA (AAL2) session.
           </p>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+        <div className="um-header-actions">
           {lastRefreshedAt && (
-            <small style={{ opacity: 0.75 }}>
-              Refreshed {new Date(lastRefreshedAt).toLocaleTimeString()}
-            </small>
+            <span className="um-refresh-stamp">
+              Synced {new Date(lastRefreshedAt).toLocaleTimeString()}
+            </span>
           )}
           <button
-            className="button-secondary"
+            className="button-secondary button-small"
             disabled={isRefreshing}
             onClick={handleRefresh}
             type="button"
           >
-            {isRefreshing ? "Refreshing…" : "Refresh Directory"}
+            {isRefreshing ? "Syncing Directory…" : "Refresh Directory"}
           </button>
         </div>
       </div>
 
-      {/* Global action feedback */}
-      {revokeState.message && (
-        <p className="module-success" role="status" style={{ marginBottom: "12px" }}>
-          {revokeState.message}
-        </p>
-      )}
-      {restoreState.message && (
-        <p className="module-success" role="status" style={{ marginBottom: "12px" }}>
-          {restoreState.message}
-        </p>
-      )}
-      {deleteState.message && (
-        <p className="module-success" role="status" style={{ marginBottom: "12px" }}>
-          {deleteState.message}
-        </p>
+      {/* Dismissible Action Feedback Banner */}
+      {actionBanner && (
+        <div
+          className={
+            actionBanner.type === "success" ? "module-success" : "module-alert"
+          }
+          role={actionBanner.type === "success" ? "status" : "alert"}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: "12px",
+          }}
+        >
+          <span>{actionBanner.text}</span>
+          <button
+            className="button-secondary button-small"
+            onClick={() => setActionBanner(null)}
+            type="button"
+          >
+            Dismiss
+          </button>
+        </div>
       )}
 
-      {/* Summary KPI cards */}
-      <div className="module-stat-grid" style={{ marginBottom: "18px" }}>
-        <div className="module-stat">
-          <span>Total Supabase Auth Users</span>
-          <strong>{counts.total}</strong>
-          <small>{counts.verifiedMfaCount} with verified TOTP MFA</small>
+      {/* Compact KPI Summary Grid */}
+      <div className="um-kpi-grid">
+        <div className="um-kpi-card um-kpi-card--gold">
+          <span className="um-kpi-label">Total Auth Users</span>
+          <strong className="um-kpi-value">{counts.total}</strong>
+          <span className="um-kpi-sub">
+            {counts.verifiedMfaCount} with verified TOTP MFA
+          </span>
         </div>
-        <div className="module-stat">
-          <span>Verified / Active Accounts</span>
-          <strong style={{ color: "#6ee7b7" }}>{counts.realOrActive}</strong>
-          <small>Protected Owner, Staff &amp; Active Clients</small>
+        <div className="um-kpi-card">
+          <span className="um-kpi-label">Verified &amp; Active</span>
+          <strong className="um-kpi-value" style={{ color: "#6ee7b7" }}>
+            {counts.realOrActive}
+          </strong>
+          <span className="um-kpi-sub">
+            Protected Owner, Staff &amp; Active Clients
+          </span>
         </div>
-        <div className="module-stat">
-          <span>Acceptance-Test Artifacts</span>
-          <strong style={{ color: "#fcd34d" }}>{counts.confirmedTest}</strong>
-          <small>Flagged for review (never auto-deleted)</small>
+        <div className="um-kpi-card">
+          <span className="um-kpi-label">Test Artifacts</span>
+          <strong className="um-kpi-value" style={{ color: "#fcd34d" }}>
+            {counts.confirmedTest}
+          </strong>
+          <span className="um-kpi-sub">
+            Flagged for review (never auto-deleted)
+          </span>
         </div>
-        <div className="module-stat">
-          <span>Unassigned / Needs Review</span>
-          <strong style={{ color: "#93c5fd" }}>{counts.unknownUnassigned}</strong>
-          <small>{counts.disabledCount} disabled / revoked</small>
+        <div className="um-kpi-card">
+          <span className="um-kpi-label">Pending / Review</span>
+          <strong className="um-kpi-value" style={{ color: "var(--gold-bright)" }}>
+            {counts.unknownUnassigned}
+          </strong>
+          <span className="um-kpi-sub">
+            {counts.disabledCount} disabled or revoked
+          </span>
         </div>
       </div>
 
-      {/* Filter & Search Bar */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(185px, 1fr))",
-          gap: "10px",
-          marginBottom: "16px",
-          padding: "14px",
-          borderRadius: "10px",
-          background: "rgba(255,255,255,0.02)",
-          border: "1px solid rgba(255,255,255,0.08)",
-        }}
-      >
-        <div>
-          <label
-            htmlFor="user-dir-search"
-            style={{ display: "block", fontSize: "12px", marginBottom: "4px" }}
-          >
-            Search email, name, UUID, or org
+      {/* Filter & Search Toolbar */}
+      <div className="um-toolbar">
+        <div className="um-filter-field">
+          <label htmlFor="user-dir-search">
+            Search email, name, UUID, or organization
           </label>
           <input
             id="user-dir-search"
@@ -364,26 +587,19 @@ export function UserManagementDirectory({
               setPage(1);
             }}
             placeholder="Search directory…"
-            style={{ width: "100%" }}
             type="search"
             value={search}
           />
         </div>
 
-        <div>
-          <label
-            htmlFor="user-dir-access"
-            style={{ display: "block", fontSize: "12px", marginBottom: "4px" }}
-          >
-            Access Status
-          </label>
+        <div className="um-filter-field">
+          <label htmlFor="user-dir-access">Access Status</label>
           <select
             id="user-dir-access"
             onChange={(e) => {
               setAccessStatus(e.target.value as "all" | UserAccessStatus);
               setPage(1);
             }}
-            style={{ width: "100%" }}
             value={accessStatus}
           >
             <option value="all">All access states</option>
@@ -395,13 +611,8 @@ export function UserManagementDirectory({
           </select>
         </div>
 
-        <div>
-          <label
-            htmlFor="user-dir-role"
-            style={{ display: "block", fontSize: "12px", marginBottom: "4px" }}
-          >
-            Role / Workspace Scope
-          </label>
+        <div className="um-filter-field">
+          <label htmlFor="user-dir-role">Role / Scope</label>
           <select
             id="user-dir-role"
             onChange={(e) => {
@@ -417,7 +628,6 @@ export function UserManagementDirectory({
               );
               setPage(1);
             }}
-            style={{ width: "100%" }}
             value={roleFilter}
           >
             <option value="all">All roles &amp; scopes</option>
@@ -430,13 +640,8 @@ export function UserManagementDirectory({
           </select>
         </div>
 
-        <div>
-          <label
-            htmlFor="user-dir-diag"
-            style={{ display: "block", fontSize: "12px", marginBottom: "4px" }}
-          >
-            Diagnostic Classification
-          </label>
+        <div className="um-filter-field">
+          <label htmlFor="user-dir-diag">Classification</label>
           <select
             id="user-dir-diag"
             onChange={(e) => {
@@ -445,80 +650,63 @@ export function UserManagementDirectory({
               );
               setPage(1);
             }}
-            style={{ width: "100%" }}
             value={diagnosticFilter}
           >
             <option value="all">All classifications</option>
             <option value="real_or_active_account">
-              Verified / Active Accounts ({counts.realOrActive})
+              Verified / Active ({counts.realOrActive})
             </option>
             <option value="confirmed_test_account">
-              Acceptance-Test Artifacts ({counts.confirmedTest})
+              Test Artifacts ({counts.confirmedTest})
             </option>
             <option value="unknown_unassigned_account">
-              Unassigned / Review ({counts.unknownUnassigned})
+              Pending / Review ({counts.unknownUnassigned})
             </option>
           </select>
         </div>
 
-        <div>
-          <label
-            htmlFor="user-dir-mfa"
-            style={{ display: "block", fontSize: "12px", marginBottom: "4px" }}
-          >
-            MFA Security Posture
-          </label>
+        <div className="um-filter-field">
+          <label htmlFor="user-dir-mfa">MFA Posture</label>
           <select
             id="user-dir-mfa"
             onChange={(e) => {
               setMfaFilter(e.target.value as "all" | UserMfaSummaryStatus);
               setPage(1);
             }}
-            style={{ width: "100%" }}
             value={mfaFilter}
           >
             <option value="all">All MFA states</option>
             <option value="verified_totp">Verified TOTP</option>
             <option value="unverified_factor">Unverified Factor</option>
-            <option value="no_mfa">No MFA Enrolled</option>
+            <option value="no_mfa">No Factor Enrolled</option>
           </select>
         </div>
       </div>
 
-      {/* Filter summary bar */}
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          flexWrap: "wrap",
-          gap: "10px",
-          marginBottom: "12px",
-        }}
-      >
-        <small>
+      {/* Filter Summary Bar */}
+      <div className="um-summary-bar">
+        <span>
           Showing <strong>{pagination.paginatedUsers.length}</strong> of{" "}
           <strong>{pagination.filteredCount}</strong> matching accounts (total{" "}
-          {pagination.totalCount} in Supabase Auth)
-        </small>
-        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+          <strong>{pagination.totalCount}</strong> in Supabase Auth)
+        </span>
+        <div className="um-summary-controls">
           {(search ||
             accessStatus !== "all" ||
             roleFilter !== "all" ||
             diagnosticFilter !== "all" ||
             mfaFilter !== "all") && (
             <button
-              className="button-secondary"
+              className="button-secondary button-small"
               onClick={resetFilters}
               type="button"
             >
               Reset Filters
             </button>
           )}
-          <label htmlFor="user-dir-pagesize" style={{ fontSize: "12px" }}>
-            Rows:
-          </label>
+          <label htmlFor="user-dir-pagesize">Rows:</label>
           <select
+            className="um-pagesize-select"
             id="user-dir-pagesize"
             onChange={(e) => {
               setPageSize(Number(e.target.value));
@@ -533,266 +721,220 @@ export function UserManagementDirectory({
         </div>
       </div>
 
-      {/* Error / Empty / Table States */}
+      {/* Directory Table */}
       {directoryError ? (
         <p className="module-alert" role="alert">
           {directoryError}
         </p>
       ) : pagination.paginatedUsers.length === 0 ? (
-        <p className="module-empty">
-          No user accounts match the current filter criteria.
-        </p>
+        <div className="module-empty">
+          <p>No user accounts match the current filter criteria.</p>
+        </div>
       ) : (
-        <div className="module-table-wrap">
-          <table className="module-table">
+        <div
+          className="um-table-wrap"
+          style={{ opacity: isRefreshing ? 0.65 : 1, transition: "opacity 150ms ease" }}
+        >
+          <table className="um-table">
             <thead>
               <tr>
-                <th>User &amp; Classification</th>
-                <th>Created &amp; Last Sign-In</th>
-                <th>Global Platform Role</th>
-                <th>Organizations &amp; Roles</th>
-                <th>Verification &amp; Invites</th>
-                <th>MFA &amp; Access Status</th>
-                <th>Role Assignment</th>
-                {isSuperAdminActor && <th>Super Admin Actions</th>}
+                <th>User Identity</th>
+                <th>Activity</th>
+                <th>Roles &amp; Organizations</th>
+                <th>Verification &amp; MFA</th>
+                <th>Access &amp; Role Assignment</th>
+                {isSuperAdminActor && <th>Governance</th>}
               </tr>
             </thead>
             <tbody>
               {pagination.paginatedUsers.map((u) => {
                 const diag = formatDiagnosticBadge(u.diagnosticCategory);
-                const accessBadge = formatAccessStatusLabel(u.accessStatus);
-                const mfaBadge = formatMfaLabel(u);
+                const accessBadge = formatAccessStatusBadge(u.accessStatus);
+                const mfaBadge = formatMfaBadge(u);
                 const latestInvite = u.invitations[0] ?? null;
 
                 return (
                   <tr key={u.userId}>
-                    <td>
-                      <strong>{u.displayName || u.email.split("@")[0]}</strong>
-                      <small style={{ display: "block" }}>{u.email}</small>
-                      <small
-                        style={{
-                          display: "block",
-                          fontFamily: "monospace",
-                          fontSize: "11px",
-                          opacity: 0.7,
-                        }}
-                      >
-                        ID: {u.userId.slice(0, 8)}…
-                      </small>
-                      <span
-                        style={{
-                          display: "inline-block",
-                          marginTop: "6px",
-                          padding: "2px 8px",
-                          borderRadius: "999px",
-                          fontSize: "11px",
-                          fontWeight: 600,
-                          color: diag.color,
-                          border: `1px solid ${diag.border}`,
-                          background: diag.bg,
-                        }}
-                        title={u.diagnosticSignals.join(" • ")}
-                      >
-                        {diag.label}
+                    {/* Column 1: User Identity */}
+                    <td className="um-cell-identity">
+                      <span className="um-user-name">
+                        {u.displayName || u.email.split("@")[0]}
+                      </span>
+                      <span className="um-user-email">{u.email}</span>
+                      <div className="um-user-meta-row">
+                        <span className="um-user-id" title={u.userId}>
+                          ID: {u.userId.slice(0, 8)}…
+                        </span>
+                        <span
+                          className={diag.badgeClass}
+                          title={u.diagnosticSignals.join(" • ")}
+                        >
+                          {diag.label}
+                        </span>
+                      </div>
+                    </td>
+
+                    {/* Column 2: Activity */}
+                    <td className="um-cell-activity">
+                      <span className="um-meta-line">
+                        <strong>Created:</strong>{" "}
+                        {formatShortTimestamp(u.createdAt)}
+                      </span>
+                      <span className="um-meta-line">
+                        <strong>Last login:</strong>{" "}
+                        {formatShortTimestamp(u.lastSignInAt)}
                       </span>
                     </td>
 
-                    <td>
-                      <small style={{ display: "block" }}>
-                        <strong>Created:</strong>{" "}
-                        {new Date(u.createdAt).toLocaleDateString()}{" "}
-                        {new Date(u.createdAt).toLocaleTimeString([], {
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
-                      </small>
-                      <small style={{ display: "block", marginTop: "4px" }}>
-                        <strong>Last sign-in:</strong>{" "}
-                        {u.lastSignInAt
-                          ? `${new Date(u.lastSignInAt).toLocaleDateString()} ${new Date(
-                              u.lastSignInAt,
-                            ).toLocaleTimeString([], {
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            })}`
-                          : "Never signed in"}
-                      </small>
-                    </td>
-
-                    <td>
-                      {u.isSuperAdmin ? (
-                        <span className="scope-tag scope-platform">
-                          Global Super Admin
-                        </span>
-                      ) : u.platformRoles.length > 0 ? (
-                        u.platformRoles.map((role) => (
-                          <span
-                            className="record-status"
-                            key={role}
-                            style={{
-                              display: "inline-block",
-                              marginRight: "4px",
-                              textTransform: "capitalize",
-                            }}
-                          >
-                            {role.replaceAll("_", " ")}
+                    {/* Column 3: Roles & Organizations */}
+                    <td className="um-cell-roles">
+                      <div className="um-badge-stack">
+                        {u.isSuperAdmin ? (
+                          <span className="um-badge um-badge-gold">
+                            Global Super Admin
                           </span>
-                        ))
-                      ) : (
-                        <small style={{ opacity: 0.75 }}>No platform role</small>
-                      )}
+                        ) : u.platformRoles.length > 0 ? (
+                          u.platformRoles.map((role) => (
+                            <span
+                              className="um-badge um-badge-gold"
+                              key={role}
+                              style={{ textTransform: "capitalize" }}
+                            >
+                              {role.replaceAll("_", " ")}
+                            </span>
+                          ))
+                        ) : (
+                          <span className="um-meta-line">No platform role</span>
+                        )}
+                      </div>
+
                       {u.revokedPlatformRoles.length > 0 && (
-                        <small style={{ display: "block", opacity: 0.65 }}>
+                        <span
+                          className="um-meta-line"
+                          style={{ marginTop: "4px", color: "#fca5a5" }}
+                        >
                           Revoked:{" "}
                           {u.revokedPlatformRoles
                             .map((r) => r.replaceAll("_", " "))
                             .join(", ")}
-                        </small>
+                        </span>
                       )}
-                    </td>
 
-                    <td>
-                      {u.organizations.length > 0 ? (
-                        u.organizations.map((org) => (
-                          <div
-                            key={org.organizationId}
-                            style={{ marginBottom: "4px" }}
-                          >
-                            <strong>{org.organizationName}</strong>{" "}
-                            <small>({org.membershipStatus})</small>
-                            <small
-                              style={{
-                                display: "block",
-                                textTransform: "capitalize",
-                              }}
+                      {u.organizations.length > 0 && (
+                        <div style={{ marginTop: "6px" }}>
+                          {u.organizations.map((org) => (
+                            <div
+                              className="um-org-item"
+                              key={org.organizationId}
                             >
-                              {org.roles.length > 0
-                                ? org.roles
-                                    .map((r) => r.replaceAll("_", " "))
-                                    .join(", ")
-                                : "No active role"}
-                            </small>
-                          </div>
-                        ))
-                      ) : (
-                        <small style={{ opacity: 0.75 }}>
-                          No organization memberships
-                        </small>
+                              <strong>{org.organizationName}</strong>{" "}
+                              <span style={{ color: "var(--subtle)" }}>
+                                ({org.membershipStatus})
+                              </span>
+                              <span
+                                className="um-meta-line"
+                                style={{ textTransform: "capitalize" }}
+                              >
+                                {org.roles.length > 0
+                                  ? org.roles
+                                      .map((r) => r.replaceAll("_", " "))
+                                      .join(", ")
+                                  : "Member"}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
                       )}
                     </td>
 
-                    <td>
-                      <span
-                        className="record-status"
-                        style={{
-                          color: u.emailConfirmedAt ? "#6ee7b7" : "#fcd34d",
-                        }}
-                      >
-                        {u.emailConfirmedAt
-                          ? "Email Confirmed"
-                          : "Email Unconfirmed"}
-                      </span>
-                      {latestInvite ? (
-                        <small style={{ display: "block", marginTop: "4px" }}>
-                          Invite: <strong>{latestInvite.status}</strong> (
-                          {latestInvite.role.replaceAll("_", " ")})
-                        </small>
-                      ) : u.invitedAt ? (
-                        <small style={{ display: "block", marginTop: "4px" }}>
-                          Auth invited{" "}
-                          {new Date(u.invitedAt).toLocaleDateString()}
-                        </small>
-                      ) : (
-                        <small
-                          style={{
-                            display: "block",
-                            marginTop: "4px",
-                            opacity: 0.7,
-                          }}
+                    {/* Column 4: Verification & MFA */}
+                    <td className="um-cell-security">
+                      <div className="um-badge-stack">
+                        <span
+                          className={
+                            u.emailConfirmedAt
+                              ? "um-badge um-badge-green"
+                              : "um-badge um-badge-amber"
+                          }
                         >
-                          Direct Auth record
-                        </small>
-                      )}
-                    </td>
+                          {u.emailConfirmedAt
+                            ? "Email Confirmed"
+                            : "Email Unconfirmed"}
+                        </span>
 
-                    <td>
-                      <span
-                        className="record-status"
-                        style={{
-                          display: "inline-block",
-                          marginBottom: "4px",
-                          color:
-                            accessBadge.tone === "gold"
-                              ? "var(--gold)"
-                              : accessBadge.tone === "green"
-                                ? "#6ee7b7"
-                                : accessBadge.tone === "red"
-                                  ? "#fca5a5"
-                                  : "inherit",
-                        }}
-                      >
-                        {accessBadge.label}
-                      </span>
-                      <small style={{ display: "block" }}>
-                        MFA:{" "}
-                        <strong
-                          style={{
-                            color: mfaBadge.verified ? "#6ee7b7" : "inherit",
-                          }}
-                        >
+                        <span className={mfaBadge.badgeClass}>
                           {mfaBadge.label}
-                        </strong>
-                      </small>
+                        </span>
+
+                        {u.isCurrentSessionUser &&
+                          u.currentSessionAal === "aal2" && (
+                            <span className="um-badge um-badge-gold">
+                              Session: AAL2 Verified
+                            </span>
+                          )}
+                      </div>
+
+                      <span className="um-meta-line" style={{ marginTop: "5px" }}>
+                        {latestInvite ? (
+                          <>
+                            Invite: <strong>{latestInvite.status}</strong> (
+                            {latestInvite.role.replaceAll("_", " ")})
+                          </>
+                        ) : u.invitedAt ? (
+                          <>
+                            Invited{" "}
+                            {new Date(u.invitedAt).toLocaleDateString()}
+                          </>
+                        ) : (
+                          "Direct Auth account"
+                        )}
+                      </span>
+                    </td>
+
+                    {/* Column 5: Access Status & Role Assignment */}
+                    <td className="um-cell-assignment">
+                      <div className="um-badge-stack">
+                        <span className={accessBadge.badgeClass}>
+                          {accessBadge.label}
+                        </span>
+                      </div>
                       {u.accessRevokedAt && (
-                        <small
-                          style={{
-                            display: "block",
-                            color: "#fca5a5",
-                            marginTop: "2px",
-                          }}
+                        <span
+                          className="um-meta-line"
+                          style={{ color: "#fca5a5", marginTop: "4px" }}
                         >
                           Revoked{" "}
                           {new Date(u.accessRevokedAt).toLocaleDateString()}
-                        </small>
+                        </span>
+                      )}
+                      {!u.isSuperAdmin && (
+                        <PlatformRoleActions
+                          canAssignPlatformAdmin={canAssignPlatformAdmin}
+                          emailConfirmed={Boolean(u.emailConfirmedAt)}
+                          roles={u.platformRoles}
+                          userId={u.userId}
+                        />
                       )}
                     </td>
 
-                    <td>
-                      <PlatformRoleActions
-                        canAssignPlatformAdmin={canAssignPlatformAdmin}
-                        emailConfirmed={Boolean(u.emailConfirmedAt)}
-                        roles={u.platformRoles}
-                        userId={u.userId}
-                      />
-                    </td>
-
+                    {/* Column 6: Super Admin Governance Actions */}
                     {isSuperAdminActor && (
-                      <td>
-                        <div
-                          style={{
-                            display: "flex",
-                            flexDirection: "column",
-                            gap: "6px",
-                            minWidth: "185px",
-                          }}
-                        >
+                      <td className="um-cell-actions">
+                        <div className="um-action-stack">
                           {u.canRevokeAccess && (
                             <button
-                              className="button-secondary"
-                              onClick={() => {
-                                setRevokeTarget(u);
-                                setRevokeReason("");
-                              }}
+                              className="button-secondary button-small"
+                              onClick={() => openRevokeModal(u)}
                               type="button"
                             >
-                              Revoke Access / Disable
+                              Revoke Access
                             </button>
                           )}
 
                           {u.canRestoreAccess && (
                             <button
-                              className="button-secondary"
-                              onClick={() => setRestoreTarget(u)}
+                              className="button-secondary button-small"
+                              onClick={() => openRestoreModal(u)}
                               type="button"
                             >
                               Restore Access
@@ -801,30 +943,20 @@ export function UserManagementDirectory({
 
                           {u.canPermanentlyDelete ? (
                             <button
-                              className="button-secondary"
-                              onClick={() => {
-                                setDeleteTarget(u);
-                                setConfirmationEmail("");
-                                setTypedConfirmation("");
-                              }}
-                              style={{
-                                borderColor: "rgba(239, 68, 68, 0.55)",
-                                color: "#fca5a5",
-                              }}
+                              className="button-danger button-small"
+                              onClick={() => openDeleteModal(u)}
                               type="button"
                             >
-                              Permanently Delete User
+                              Delete User
                             </button>
                           ) : (
-                            <small
-                              style={{
-                                fontSize: "11px",
-                                opacity: 0.75,
-                                lineHeight: 1.35,
-                              }}
-                            >
-                              {u.permanentDeleteBlockReason}
-                            </small>
+                            <span className="um-protection-note">
+                              {u.isProtectedOwner
+                                ? "Protected Owner account"
+                                : u.isCurrentSessionUser
+                                  ? "Active Super Admin session"
+                                  : u.permanentDeleteBlockReason}
+                            </span>
                           )}
                         </div>
                       </td>
@@ -839,21 +971,14 @@ export function UserManagementDirectory({
 
       {/* Pagination Footer */}
       {pagination.totalPages > 1 && (
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            marginTop: "14px",
-          }}
-        >
-          <small>
+        <div className="um-pagination">
+          <span>
             Page <strong>{pagination.page}</strong> of{" "}
             <strong>{pagination.totalPages}</strong>
-          </small>
+          </span>
           <div style={{ display: "flex", gap: "8px" }}>
             <button
-              className="button-secondary"
+              className="button-secondary button-small"
               disabled={pagination.page <= 1}
               onClick={() => setPage((p) => Math.max(1, p - 1))}
               type="button"
@@ -861,7 +986,7 @@ export function UserManagementDirectory({
               Previous
             </button>
             <button
-              className="button-secondary"
+              className="button-secondary button-small"
               disabled={pagination.page >= pagination.totalPages}
               onClick={() =>
                 setPage((p) => Math.min(pagination.totalPages, p + 1))
@@ -879,101 +1004,80 @@ export function UserManagementDirectory({
         <div
           aria-labelledby="revoke-modal-title"
           aria-modal="true"
-          role="dialog"
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(5, 8, 15, 0.82)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: "20px",
-            zIndex: 1000,
+          className="workspace-dialog-backdrop"
+          onClick={closeRevokeModal}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") closeRevokeModal();
           }}
+          role="dialog"
         >
           <div
-            className="module-panel"
-            style={{
-              maxWidth: "540px",
-              width: "100%",
-              border: "1px solid rgba(245, 158, 11, 0.45)",
-            }}
+            className="um-modal-card um-modal-card--warning"
+            onClick={(e) => e.stopPropagation()}
           >
             <p className="eyebrow">REVERSIBLE ACCESS REVOCATION</p>
-            <h3 id="revoke-modal-title" style={{ marginTop: "4px" }}>
+            <h3 id="revoke-modal-title" style={{ margin: "4px 0 6px" }}>
               Revoke Access / Disable Account
             </h3>
-            <p>
-              You are disabling workspace access for{" "}
-              <strong>{revokeTarget.email}</strong>.
-            </p>
-            <ul style={{ fontSize: "13px", lineHeight: 1.5, paddingLeft: "18px" }}>
+            <div className="um-modal-target">
+              <strong>
+                {revokeTarget.displayName || revokeTarget.email.split("@")[0]}
+              </strong>
+              <span>{revokeTarget.email}</span>
+              <code>ID: {revokeTarget.userId}</code>
+            </div>
+            <ul className="um-modal-list">
               <li>
-                Active global platform roles and pending invitations for this
-                email will be revoked.
+                Revokes active global platform roles and pending invitations.
               </li>
               <li>
-                The Supabase Auth account will be banned from signing in or
-                accessing <code>/admin</code> and <code>/portal</code>.
+                Applies a Supabase Auth sign-in ban blocking{" "}
+                <code>/admin</code> and <code>/portal</code> access.
               </li>
               <li>
-                <strong>Preserved:</strong> The Supabase Auth identity,
-                organizations, projects, invoices, support tickets, and audit
-                history are preserved intact.
+                <strong>Preserved:</strong> Auth identity, organizations,
+                projects, invoices, support records, and audit history remain
+                intact.
               </li>
             </ul>
-            <form action={revokeAction}>
-              <input
-                name="target-user-id"
-                type="hidden"
-                value={revokeTarget.userId}
-              />
-              <div style={{ marginTop: "12px" }}>
-                <label
-                  htmlFor="revoke-reason-input"
-                  style={{ display: "block", fontSize: "12px", marginBottom: "4px" }}
-                >
-                  Audit reason (optional)
+            <form onSubmit={handleRevokeSubmit}>
+              <div className="um-step-field">
+                <label className="um-step-header" htmlFor="revoke-reason-input">
+                  <span>Audit reason (optional)</span>
                 </label>
                 <input
+                  className="um-step-input"
+                  disabled={isRevoking}
                   id="revoke-reason-input"
                   name="reason"
                   onChange={(e) => setRevokeReason(e.target.value)}
                   placeholder="e.g., Access revoked after engagement completion"
-                  style={{ width: "100%" }}
                   type="text"
                   value={revokeReason}
                 />
               </div>
-              {revokeState.error && (
-                <p className="module-alert" role="alert" style={{ marginTop: "10px" }}>
-                  {revokeState.error}
+
+              {modalError && (
+                <p className="module-alert" role="alert">
+                  {modalError}
                 </p>
               )}
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "flex-end",
-                  gap: "10px",
-                  marginTop: "16px",
-                }}
-              >
+
+              <div className="um-modal-actions">
                 <button
                   className="button-secondary"
-                  disabled={revokePending}
-                  onClick={() => setRevokeTarget(null)}
+                  disabled={isRevoking}
+                  onClick={closeRevokeModal}
                   type="button"
                 >
                   Cancel
                 </button>
                 <button
-                  className="button-primary"
-                  disabled={revokePending}
+                  className="button-gold"
+                  disabled={isRevoking}
                   type="submit"
                 >
-                  {revokePending
-                    ? "Revoking Access…"
-                    : "Confirm Revoke & Disable"}
+                  {isRevoking ? "Revoking Access…" : "Confirm Revoke & Disable"}
                 </button>
               </div>
             </form>
@@ -986,61 +1090,53 @@ export function UserManagementDirectory({
         <div
           aria-labelledby="restore-modal-title"
           aria-modal="true"
-          role="dialog"
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(5, 8, 15, 0.82)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: "20px",
-            zIndex: 1000,
+          className="workspace-dialog-backdrop"
+          onClick={closeRestoreModal}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") closeRestoreModal();
           }}
+          role="dialog"
         >
-          <div className="module-panel" style={{ maxWidth: "480px", width: "100%" }}>
+          <div
+            className="um-modal-card"
+            onClick={(e) => e.stopPropagation()}
+          >
             <p className="eyebrow">RESTORE ACCOUNT SIGN-IN</p>
-            <h3 id="restore-modal-title" style={{ marginTop: "4px" }}>
+            <h3 id="restore-modal-title" style={{ margin: "4px 0 6px" }}>
               Restore Account Access
             </h3>
-            <p>
-              Remove the sign-in ban for <strong>{restoreTarget.email}</strong>?
-              Previously revoked platform roles remain unassigned until you
-              explicitly grant a role.
+            <div className="um-modal-target">
+              <strong>
+                {restoreTarget.displayName || restoreTarget.email.split("@")[0]}
+              </strong>
+              <span>{restoreTarget.email}</span>
+              <code>ID: {restoreTarget.userId}</code>
+            </div>
+            <p style={{ color: "var(--muted)", fontSize: "12.5px", lineHeight: 1.55 }}>
+              Removes the Supabase Auth sign-in ban for this account. Previously
+              revoked platform roles remain unassigned until explicitly granted.
             </p>
-            <form action={restoreAction}>
-              <input
-                name="target-user-id"
-                type="hidden"
-                value={restoreTarget.userId}
-              />
-              {restoreState.error && (
+            <form onSubmit={handleRestoreSubmit}>
+              {modalError && (
                 <p className="module-alert" role="alert">
-                  {restoreState.error}
+                  {modalError}
                 </p>
               )}
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "flex-end",
-                  gap: "10px",
-                  marginTop: "16px",
-                }}
-              >
+              <div className="um-modal-actions">
                 <button
                   className="button-secondary"
-                  disabled={restorePending}
-                  onClick={() => setRestoreTarget(null)}
+                  disabled={isRestoring}
+                  onClick={closeRestoreModal}
                   type="button"
                 >
                   Cancel
                 </button>
                 <button
-                  className="button-primary"
-                  disabled={restorePending}
+                  className="button-gold"
+                  disabled={isRestoring}
                   type="submit"
                 >
-                  {restorePending ? "Restoring…" : "Restore Sign-In Access"}
+                  {isRestoring ? "Restoring…" : "Restore Sign-In Access"}
                 </button>
               </div>
             </form>
@@ -1053,162 +1149,154 @@ export function UserManagementDirectory({
         <div
           aria-labelledby="delete-modal-title"
           aria-modal="true"
-          role="dialog"
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(5, 8, 15, 0.86)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: "20px",
-            zIndex: 1000,
+          className="workspace-dialog-backdrop"
+          onClick={closeDeleteModal}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") closeDeleteModal();
           }}
+          role="dialog"
         >
           <div
-            className="module-panel"
-            style={{
-              maxWidth: "600px",
-              width: "100%",
-              border: "1px solid rgba(239, 68, 68, 0.65)",
-            }}
+            className="um-modal-card um-modal-card--danger"
+            onClick={(e) => e.stopPropagation()}
           >
             <p className="eyebrow" style={{ color: "#fca5a5" }}>
               IRREVERSIBLE SUPABASE AUTH DELETION
             </p>
-            <h3 id="delete-modal-title" style={{ marginTop: "4px" }}>
+            <h3 id="delete-modal-title" style={{ margin: "4px 0 6px" }}>
               Permanently Delete User Account
             </h3>
-            <p>
-              You are about to permanently delete{" "}
-              <strong>{deleteTarget.email}</strong> (
-              <code>{deleteTarget.userId}</code>) from{" "}
-              <strong>Supabase Auth</strong> (<code>auth.users</code>) and{" "}
-              <code>public.profiles</code>.
-            </p>
 
-            <div
-              style={{
-                padding: "12px",
-                borderRadius: "8px",
-                background: "rgba(239, 68, 68, 0.08)",
-                border: "1px solid rgba(239, 68, 68, 0.3)",
-                fontSize: "13px",
-                marginBottom: "14px",
-              }}
-            >
-              <strong>Consequences of permanent deletion:</strong>
-              <ul style={{ margin: "6px 0 0", paddingLeft: "18px", lineHeight: 1.5 }}>
-                <li>
-                  <strong>Permanently deleted:</strong> Supabase Auth identity (
-                  <code>auth.users</code>), <code>public.profiles</code> row,
-                  user notifications, and platform role assignments for this
-                  user.
-                </li>
-                <li>
-                  <strong>Retained &amp; preserved:</strong> All organizations,
-                  projects, tasks, documents, invoices, payments, support
-                  records, and <code>audit_events</code> history are preserved
-                  (nullable creator/actor references are detached to{" "}
-                  <code>NULL</code>).
-                </li>
-                <li>
-                  <strong>Irreversible:</strong> This action cannot be undone.
-                  If you only want to block sign-in, cancel and choose{" "}
-                  <em>Revoke Access / Disable</em> instead.
-                </li>
-              </ul>
+            <div className="um-modal-target">
+              <strong>
+                {deleteTarget.displayName || deleteTarget.email.split("@")[0]}
+              </strong>
+              <span>{deleteTarget.email}</span>
+              <code>ID: {deleteTarget.userId}</code>
             </div>
 
-            <form action={deleteAction}>
+            <ul className="um-modal-list">
+              <li>
+                <strong>Deleted permanently:</strong> Supabase Auth identity (
+                <code>auth.users</code>), <code>public.profiles</code>,
+                notifications, and platform role assignments.
+              </li>
+              <li>
+                <strong>Preserved:</strong> Organizations, projects, invoices,
+                payments, support tickets, and <code>audit_events</code> history
+                remain intact.
+              </li>
+              <li>
+                <strong>Irreversible:</strong> Cannot be undone. Use{" "}
+                <em>Revoke Access</em> instead if you only want to block sign-in.
+              </li>
+            </ul>
+
+            <form noValidate onSubmit={handlePermanentDeleteSubmit}>
               <input
                 name="target-user-id"
                 type="hidden"
                 value={deleteTarget.userId}
               />
 
-              <div style={{ marginBottom: "12px" }}>
+              <div className="um-step-field">
                 <label
+                  className="um-step-header"
                   htmlFor="delete-confirm-email"
-                  style={{ display: "block", fontSize: "12px", marginBottom: "4px" }}
                 >
-                  Step 1 — Enter the target user&apos;s exact email:{" "}
-                  <code>{deleteTarget.email}</code>
+                  <span>
+                    Step 1 — Enter exact email:{" "}
+                    <code>{deleteTarget.email}</code>
+                  </span>
+                  <span
+                    className={
+                      step1EmailMatched
+                        ? "um-badge um-badge-green"
+                        : "um-badge um-badge-muted"
+                    }
+                  >
+                    {step1EmailMatched ? "✓ Matched" : "Required"}
+                  </span>
                 </label>
                 <input
                   autoComplete="off"
+                  className={`um-step-input${step1EmailMatched ? " is-matched" : ""}`}
+                  disabled={isDeleting}
                   id="delete-confirm-email"
+                  inputMode="email"
                   name="confirmation-email"
-                  onChange={(e) => setConfirmationEmail(e.target.value)}
+                  onChange={(e) => {
+                    setConfirmationEmail(e.target.value);
+                    if (modalError) setModalError(null);
+                  }}
                   placeholder={deleteTarget.email}
-                  required
-                  style={{ width: "100%" }}
-                  type="email"
+                  spellCheck={false}
+                  type="text"
                   value={confirmationEmail}
                 />
               </div>
 
-              <div style={{ marginBottom: "12px" }}>
+              <div className="um-step-field">
                 <label
+                  className="um-step-header"
                   htmlFor="delete-typed-phrase"
-                  style={{ display: "block", fontSize: "12px", marginBottom: "4px" }}
                 >
-                  Step 2 — Type{" "}
-                  <code>{formatExpectedDeleteConfirmation(deleteTarget.email)}</code>{" "}
-                  to confirm permanent deletion:
+                  <span>
+                    Step 2 — Type{" "}
+                    <code>
+                      {formatExpectedDeleteConfirmation(deleteTarget.email)}
+                    </code>
+                  </span>
+                  <span
+                    className={
+                      step2PhraseMatched
+                        ? "um-badge um-badge-green"
+                        : "um-badge um-badge-muted"
+                    }
+                  >
+                    {step2PhraseMatched ? "✓ Matched" : "Required"}
+                  </span>
                 </label>
                 <input
                   autoComplete="off"
+                  className={`um-step-input${step2PhraseMatched ? " is-matched" : ""}`}
+                  disabled={isDeleting}
                   id="delete-typed-phrase"
                   name="typed-confirmation"
-                  onChange={(e) => setTypedConfirmation(e.target.value)}
-                  placeholder={formatExpectedDeleteConfirmation(deleteTarget.email)}
-                  required
-                  style={{ width: "100%" }}
+                  onChange={(e) => {
+                    setTypedConfirmation(e.target.value);
+                    if (modalError) setModalError(null);
+                  }}
+                  placeholder={formatExpectedDeleteConfirmation(
+                    deleteTarget.email,
+                  )}
+                  spellCheck={false}
                   type="text"
                   value={typedConfirmation}
                 />
               </div>
 
-              {deleteState.error && (
-                <p className="module-alert" role="alert" style={{ marginBottom: "12px" }}>
-                  {deleteState.error}
+              {modalError && (
+                <p className="module-alert" role="alert">
+                  {modalError}
                 </p>
               )}
 
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "flex-end",
-                  gap: "10px",
-                  marginTop: "16px",
-                }}
-              >
+              <div className="um-modal-actions">
                 <button
                   className="button-secondary"
-                  disabled={deletePending}
-                  onClick={() => {
-                    setDeleteTarget(null);
-                    setConfirmationEmail("");
-                    setTypedConfirmation("");
-                  }}
+                  disabled={isDeleting}
+                  onClick={closeDeleteModal}
                   type="button"
                 >
                   Cancel
                 </button>
                 <button
-                  className="button-primary"
-                  disabled={!isDeleteConfirmationReady || deletePending}
-                  style={{
-                    background: isDeleteConfirmationReady
-                      ? "#dc2626"
-                      : "rgba(220, 38, 38, 0.35)",
-                    borderColor: "#dc2626",
-                    color: "#fff",
-                  }}
+                  className="button-danger"
+                  disabled={!isDeleteConfirmationReady || isDeleting}
                   type="submit"
                 >
-                  {deletePending
+                  {isDeleting
                     ? "Permanently Deleting…"
                     : "Permanently Delete Auth User"}
                 </button>
@@ -1220,4 +1308,3 @@ export function UserManagementDirectory({
     </section>
   );
 }
-

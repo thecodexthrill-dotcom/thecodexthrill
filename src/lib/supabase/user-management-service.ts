@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { logSanitizedOperationalEvent } from "./platform-health-helper.ts";
 import {
   classifyAccountDiagnostics,
+  deriveMfaSummary,
   evaluateDeletionDependencies,
   isValidUuid,
   resolveUserAccessStatus,
@@ -9,7 +10,6 @@ import {
   type SuperAdminDirectoryUser,
   type UserDeletionDependencySummary,
   type UserInvitationSummary,
-  type UserMfaSummaryStatus,
   type UserOrganizationMembershipSummary,
 } from "./user-management-helper.ts";
 
@@ -34,35 +34,69 @@ export interface PlatformInvitationRpcRow {
   archived_at: string | null;
 }
 
-function deriveMfaSummary(
-  factors: Array<{ factor_type?: string; status?: string }> | undefined,
-): {
-  mfaStatus: UserMfaSummaryStatus;
-  verifiedTotpCount: number;
-  totalFactorCount: number;
-} {
-  if (!Array.isArray(factors)) {
-    return { mfaStatus: "no_mfa", verifiedTotpCount: 0, totalFactorCount: 0 };
+async function fetchMfaFactorsForDirectoryUsers(
+  admin: SupabaseClient,
+  authUsers: Array<{
+    id: string;
+    factors?: Array<{ factor_type?: string; status?: string }>;
+  }>,
+): Promise<
+  Map<string, Array<{ factor_type?: string; status?: string }> | undefined>
+> {
+  const factorsMap = new Map<
+    string,
+    Array<{ factor_type?: string; status?: string }> | undefined
+  >();
+  const usersNeedingLookup: string[] = [];
+
+  for (const u of authUsers) {
+    if (Array.isArray(u.factors)) {
+      factorsMap.set(u.id, u.factors);
+    } else {
+      usersNeedingLookup.push(u.id);
+    }
   }
-  const verifiedTotpCount = factors.filter(
-    (f) => f.factor_type === "totp" && f.status === "verified",
-  ).length;
-  const totalFactorCount = factors.length;
-  if (verifiedTotpCount > 0) {
-    return { mfaStatus: "verified_totp", verifiedTotpCount, totalFactorCount };
+
+  const mfaAdmin = (
+    admin.auth.admin as unknown as {
+      mfa?: {
+        listFactors?: (params: { userId: string }) => Promise<{
+          data?: {
+            factors?: Array<{ factor_type?: string; status?: string }>;
+          } | null;
+          error?: unknown;
+        }>;
+      };
+    }
+  ).mfa;
+
+  if (!mfaAdmin || typeof mfaAdmin.listFactors !== "function") {
+    return factorsMap;
   }
-  if (totalFactorCount > 0) {
-    return {
-      mfaStatus: "unverified_factor",
-      verifiedTotpCount: 0,
-      totalFactorCount,
-    };
+
+  const batchSize = 8;
+  for (let i = 0; i < usersNeedingLookup.length; i += batchSize) {
+    const batch = usersNeedingLookup.slice(i, i + batchSize);
+    await Promise.all(
+      batch.map(async (userId) => {
+        try {
+          const { data, error } = await mfaAdmin.listFactors!({ userId });
+          if (!error && Array.isArray(data?.factors)) {
+            factorsMap.set(userId, data.factors);
+          }
+        } catch {
+          // Leave undefined so deriveMfaSummary reports "unavailable" instead of false "no_mfa"
+        }
+      }),
+    );
   }
-  return { mfaStatus: "no_mfa", verifiedTotpCount: 0, totalFactorCount: 0 };
+
+  return factorsMap;
 }
 
 export async function loadSuperAdminUserDirectory(options: {
   actorUserId: string;
+  actorCurrentAal?: "aal1" | "aal2" | null;
   invitations?: PlatformInvitationRpcRow[];
   adminClientOverride?: SupabaseClient;
 }): Promise<{
@@ -125,6 +159,7 @@ export async function loadSuperAdminUserDirectory(options: {
     ticketsRes,
     messagesRes,
     inviteAuditRes,
+    factorsByUserId,
   ] = await Promise.all([
     admin.from("profiles").select("id, email, display_name, created_at"),
     admin
@@ -146,6 +181,7 @@ export async function loadSuperAdminUserDirectory(options: {
       .from("audit_events")
       .select("actor_user_id")
       .eq("action", "platform.invitation.created"),
+    fetchMfaFactorsForDirectoryUsers(admin, allAuthUsers),
   ]);
 
   const profileById = new Map<
@@ -297,9 +333,9 @@ export async function loadSuperAdminUserDirectory(options: {
       }
     }
 
-    const { mfaStatus, verifiedTotpCount, totalFactorCount } = deriveMfaSummary(
-      u.factors,
-    );
+    const userFactors = factorsByUserId.get(u.id);
+    const { mfaStatus, verifiedTotpCount, totalFactorCount } =
+      deriveMfaSummary(userFactors);
 
     const bannedUntil = u.banned_until ?? null;
     const isBanned = Boolean(
@@ -376,6 +412,8 @@ export async function loadSuperAdminUserDirectory(options: {
       emailConfirmedAt: u.email_confirmed_at ?? null,
       isSuperAdmin,
       isProtectedOwner: isSuperAdmin,
+      isCurrentSessionUser: isSelf,
+      currentSessionAal: isSelf ? (options.actorCurrentAal ?? null) : null,
       platformRoles,
       revokedPlatformRoles,
       organizations,
@@ -822,10 +860,12 @@ export async function permanentlyDeleteSupabaseAuthUser(input: {
   targetUserId: string;
   confirmationEmail: string;
   typedConfirmation: string;
+  userSupabaseClient?: SupabaseClient;
   adminClientOverride?: SupabaseClient;
 }): Promise<{
   ok: boolean;
   code?: string;
+  deletedUserId?: string;
   message?: string;
   error?: string;
   blockingReasons?: string[];
@@ -903,6 +943,30 @@ export async function permanentlyDeleteSupabaseAuthUser(input: {
     };
   }
 
+  // Revoke any pending platform invitations for this user if authenticated client is available
+  if (input.userSupabaseClient) {
+    try {
+      const { data: invitations } = await input.userSupabaseClient.rpc(
+        "list_platform_invitations",
+      );
+      const pendingMatches = (
+        (invitations ?? []) as PlatformInvitationRpcRow[]
+      ).filter(
+        (inv) =>
+          inv.status === "pending" &&
+          (inv.auth_user_id === input.targetUserId ||
+            inv.email.toLowerCase() === targetEmail.toLowerCase()),
+      );
+      for (const inv of pendingMatches) {
+        await input.userSupabaseClient.rpc("revoke_platform_invitation", {
+          p_invitation_id: inv.id,
+        });
+      }
+    } catch {
+      // Non-fatal; platform_invitations.auth_user_id uses ON DELETE SET NULL
+    }
+  }
+
   // Snapshot profile and platform_role_assignments before mutating so we can roll back on Auth failure
   const [{ data: profileSnapshot }, { data: platformRolesSnapshot }] =
     await Promise.all([
@@ -962,7 +1026,7 @@ export async function permanentlyDeleteSupabaseAuthUser(input: {
     };
   }
 
-  // 2. Delete target user's platform_role_assignments rows if any
+  // 2. Delete target user's platform_role_assignments and user_notifications rows if any
   if ((platformRolesSnapshot ?? []).length > 0) {
     const { error: roleDeleteErr } = await admin
       .from("platform_role_assignments")
@@ -976,6 +1040,13 @@ export async function permanentlyDeleteSupabaseAuthUser(input: {
           "Could not remove platform role assignments prior to deletion. The Auth user was not deleted.",
       };
     }
+  }
+
+  if (dependencies.userNotificationsCount > 0) {
+    await admin
+      .from("user_notifications")
+      .delete()
+      .eq("user_id", input.targetUserId);
   }
 
   // 3. Delete public.profiles row (required because profiles.id has ON DELETE RESTRICT to auth.users.id)
@@ -1084,6 +1155,7 @@ export async function permanentlyDeleteSupabaseAuthUser(input: {
   return {
     ok: true,
     code: "deleted",
+    deletedUserId: input.targetUserId,
     message: `User ${targetEmail} (${input.targetUserId.slice(0, 8)}…) was permanently deleted from Supabase Auth and verified absent.`,
   };
 }

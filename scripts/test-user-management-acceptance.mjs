@@ -84,9 +84,10 @@ async function runAcceptance() {
       `[2/7] Created disposable test user: ${disposableEmail} (${disposableUserId})`,
     );
 
-    // 3. Load Super Admin User Directory and verify classification + presence
+    // 3. Load Super Admin User Directory and verify classification + presence + MFA factor lookup
     const directory = await loadSuperAdminUserDirectory({
       actorUserId: superAdminId,
+      actorCurrentAal: "aal2",
       invitations: [],
       adminClientOverride: admin,
     });
@@ -99,6 +100,7 @@ async function runAcceptance() {
     assert.ok(disposableInDir, "Disposable user must appear in directory");
     assert.equal(disposableInDir.diagnosticCategory, "confirmed_test_account");
     assert.equal(disposableInDir.canPermanentlyDelete, true);
+    assert.equal(disposableInDir.mfaStatus, "no_mfa");
 
     const protectedOwnerInDir = directory.users.find(
       (u) => u.userId === superAdminId,
@@ -107,7 +109,13 @@ async function runAcceptance() {
     assert.equal(protectedOwnerInDir.isSuperAdmin, true);
     assert.equal(protectedOwnerInDir.canPermanentlyDelete, false);
     assert.equal(protectedOwnerInDir.canRevokeAccess, false);
-    console.log("[3/7] Verified directory loader and account classification");
+    assert.equal(protectedOwnerInDir.mfaStatus, "verified_totp");
+    assert.ok(protectedOwnerInDir.verifiedTotpCount >= 1);
+    assert.equal(protectedOwnerInDir.isCurrentSessionUser, true);
+    assert.equal(protectedOwnerInDir.currentSessionAal, "aal2");
+    console.log(
+      `[3/7] Verified directory loader, MFA factor lookup (${protectedOwnerInDir.mfaStatus}, count=${protectedOwnerInDir.verifiedTotpCount}, session=${protectedOwnerInDir.currentSessionAal}), and account classification`,
+    );
 
     // 4. Test Access Revocation & Restoration on the disposable user
     const revokeRes = await revokeUserWorkspaceAccess({

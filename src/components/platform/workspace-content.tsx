@@ -29,11 +29,8 @@ import {
   redactInternalNotesForClient,
 } from "@/lib/supabase/delivery-operations-helper";
 import {
-  CmsPagesManager,
   CmsBlogManager,
   CmsPortfolioManager,
-  CmsServicesManager,
-  CmsSiteSettingsManager,
   UnifiedCmsManager,
   type CmsPageRecord,
   type CmsPostRecord,
@@ -305,10 +302,12 @@ export async function WorkspaceContent({
       {
         data: { user: currentUser },
       },
+      { data: assuranceData },
       { data: invitationData, error: invitationError },
       { data: userData, error: userError },
     ] = await Promise.all([
       supabase.auth.getUser(),
+      supabase.auth.mfa.getAuthenticatorAssuranceLevel(),
       supabase.rpc("list_platform_invitations"),
       supabase.rpc("list_platform_users"),
     ]);
@@ -332,8 +331,15 @@ export async function WorkspaceContent({
     }[];
     const isSuperAdminActor = roles.includes("super_admin");
     const canAssignPlatformAdmin = isSuperAdminActor;
+    const actorCurrentAal =
+      assuranceData?.currentLevel === "aal2"
+        ? "aal2"
+        : assuranceData?.currentLevel === "aal1"
+          ? "aal1"
+          : null;
     const directoryResult = await loadSuperAdminUserDirectory({
       actorUserId: currentUser?.id ?? "",
+      actorCurrentAal,
       invitations,
     });
 

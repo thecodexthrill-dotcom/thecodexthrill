@@ -20,7 +20,15 @@ import {
   revokeUserWorkspaceAccess,
 } from "@/lib/supabase/user-management-service";
 
-export type AuthActionState = { error?: string; message?: string; passwordUpdated?: boolean };
+export type AuthActionState = {
+  error?: string;
+  message?: string;
+  passwordUpdated?: boolean;
+  deletedUserId?: string;
+  revokedUserId?: string;
+  restoredUserId?: string;
+  timestamp?: string;
+};
 
 const credentialsSchema = z.object({
   email: z.string().trim().email().max(320),
@@ -364,11 +372,18 @@ async function verifySameOriginRequest(): Promise<boolean> {
   const hdrs = await headers();
   const origin = hdrs.get("origin");
   if (!origin) return true;
-  const host = hdrs.get("x-forwarded-host") || hdrs.get("host");
-  if (!host) return false;
+  const rawForwardedHost = hdrs.get("x-forwarded-host") ?? "";
+  const rawHost = hdrs.get("host") ?? "";
+  const candidateHosts = [
+    ...rawForwardedHost.split(","),
+    ...rawHost.split(","),
+  ]
+    .map((h) => h.trim().toLowerCase())
+    .filter(Boolean);
+  if (candidateHosts.length === 0) return false;
   try {
     const originHost = new URL(origin).host.toLowerCase();
-    return originHost === host.trim().toLowerCase();
+    return candidateHosts.includes(originHost);
   } catch {
     return false;
   }
@@ -420,10 +435,15 @@ export async function revokeUserAccessAction(
     return { error: result.error ?? "Could not revoke account access." };
   }
 
+  revalidatePath("/admin/[[...section]]", "page");
   revalidatePath("/admin/team");
   revalidatePath("/admin/roles");
   revalidatePath("/admin/audit-logs");
-  return { message: result.message ?? "Account access revoked." };
+  return {
+    message: result.message ?? "Account access revoked.",
+    revokedUserId: parsed.data.targetUserId,
+    timestamp: new Date().toISOString(),
+  };
 }
 
 export async function restoreUserAccessAction(
@@ -468,10 +488,15 @@ export async function restoreUserAccessAction(
     return { error: result.error ?? "Could not restore account access." };
   }
 
+  revalidatePath("/admin/[[...section]]", "page");
   revalidatePath("/admin/team");
   revalidatePath("/admin/roles");
   revalidatePath("/admin/audit-logs");
-  return { message: result.message ?? "Account access restored." };
+  return {
+    message: result.message ?? "Account access restored.",
+    restoredUserId: parsed.data.targetUserId,
+    timestamp: new Date().toISOString(),
+  };
 }
 
 export async function permanentlyDeleteUserAction(
@@ -525,6 +550,7 @@ export async function permanentlyDeleteUserAction(
     targetUserId: parsed.data.targetUserId,
     confirmationEmail: parsed.data.confirmationEmail,
     typedConfirmation: parsed.data.typedConfirmation,
+    userSupabaseClient: supabase,
   });
 
   if (!result.ok) {
@@ -535,16 +561,23 @@ export async function permanentlyDeleteUserAction(
     };
   }
 
+  revalidatePath("/admin/[[...section]]", "page");
   revalidatePath("/admin/team");
   revalidatePath("/admin/roles");
   revalidatePath("/admin/audit-logs");
   revalidatePath("/admin/analytics");
-  return { message: result.message ?? "User permanently deleted from Supabase Auth." };
+  return {
+    message: result.message ?? "User permanently deleted from Supabase Auth.",
+    deletedUserId: result.deletedUserId ?? parsed.data.targetUserId,
+    timestamp: new Date().toISOString(),
+  };
 }
 
 export async function refreshUserDirectoryAction(): Promise<{ refreshedAt: string }> {
   await requireWorkspace("admin", ["team"]);
+  revalidatePath("/admin/[[...section]]", "page");
   revalidatePath("/admin/team");
   return { refreshedAt: new Date().toISOString() };
 }
+
 
