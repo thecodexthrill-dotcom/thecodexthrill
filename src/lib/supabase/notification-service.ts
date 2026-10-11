@@ -197,12 +197,23 @@ export async function dispatchOrganizationClientNotifications(params: {
 }): Promise<NotificationDispatchOutcome[]> {
   try {
     const adminClient = createAdminClient();
-    const { data: members } = await adminClient
+    const { data: members, error: membersErr } = await adminClient
       .from("organization_memberships")
       .select("user_id")
       .eq("organization_id", params.organizationId)
-      .in("role", ["client_owner", "client_manager", "client_member"])
       .eq("status", "active");
+
+    if (membersErr) {
+      logSanitizedOperationalEvent({
+        level: "warn",
+        scope: "notifications.dispatch",
+        action: "org_members_query_error",
+        message: "Failed to resolve active organization members for notification dispatch",
+        metadata: { code: membersErr.code, message: membersErr.message },
+        throttleKey: `notifications.org_members.${membersErr.code || "unknown"}`,
+      });
+      return [];
+    }
 
     if (!members || members.length === 0) return [];
 
@@ -248,25 +259,53 @@ export async function dispatchPlatformStaffNotifications(params: {
 }): Promise<NotificationDispatchOutcome[]> {
   try {
     const adminClient = createAdminClient();
-    const targetRoles = params.roles ?? [
+    const requestedRoles = params.roles ?? [
       "super_admin",
       "platform_admin",
       "operations_admin",
     ];
-    const { data: assignments } = await adminClient
-      .from("platform_role_assignments")
-      .select("user_id")
-      .in("role", targetRoles);
 
-    if (!assignments || assignments.length === 0) return [];
+    const includeSuperAdmin = requestedRoles.includes("super_admin");
+    const dbRoleSet = new Set<string>();
+    for (const r of requestedRoles) {
+      if (r === "platform_admin" || r === "operations_admin") {
+        dbRoleSet.add("platform_admin");
+      } else if (r === "support_staff" || r === "support_admin") {
+        dbRoleSet.add("support_staff");
+      } else if (r === "developer") {
+        dbRoleSet.add("developer");
+      }
+    }
+
+    const [assignmentsRes, superAdminRes] = await Promise.all([
+      dbRoleSet.size > 0
+        ? adminClient
+            .from("platform_role_assignments")
+            .select("user_id")
+            .in("role", Array.from(dbRoleSet))
+            .is("revoked_at", null)
+        : Promise.resolve({ data: [], error: null }),
+      includeSuperAdmin
+        ? adminClient
+            .from("platform_super_admin_designation")
+            .select("user_id")
+        : Promise.resolve({ data: [], error: null }),
+    ]);
+
+    const combinedUserIds = [
+      ...(assignmentsRes.data ?? []).map((a) => a.user_id),
+      ...(superAdminRes.data ?? []).map((s) => s.user_id),
+    ];
 
     const uniqueUserIds = Array.from(
       new Set(
-        assignments
-          .map((a) => a.user_id)
-          .filter((uid) => Boolean(uid) && uid !== params.excludeUserId),
+        combinedUserIds.filter(
+          (uid) => Boolean(uid) && uid !== params.excludeUserId,
+        ),
       ),
     );
+
+    if (uniqueUserIds.length === 0) return [];
 
     const results: NotificationDispatchOutcome[] = [];
     for (const uid of uniqueUserIds) {

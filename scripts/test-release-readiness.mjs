@@ -50,7 +50,7 @@ async function main() {
     console.log("  [WARN] Anonymous user listed files:", anonFiles.length);
   }
 
-  // 3. Check Auth SMTP / invitation behavior
+  // 3. Check Auth Invitation & Delivery Behavior...
   console.log("\n[3] Auth Invitation & Delivery Behavior...");
   const testEmail = "release-verification-check@example.com";
   const { data: inviteData, error: inviteErr } = await adminClient.auth.admin.inviteUserByEmail(testEmail, {
@@ -69,9 +69,18 @@ async function main() {
     }
   } else {
     console.log("  [PASS] Auth invite accepted by Supabase Auth (Custom SMTP active or permitted domain).");
-    if (inviteData?.user?.id) {
-      await adminClient.auth.admin.deleteUser(inviteData.user.id);
-      console.log("  [PASS] Cleaned up test user record.");
+  }
+
+  // Always clean up the verification user if Supabase created a partial user record before SMTP failure
+  if (inviteData?.user?.id) {
+    await adminClient.auth.admin.deleteUser(inviteData.user.id);
+    console.log("  [PASS] Cleaned up test user record.");
+  } else {
+    const { data: usersPage } = await adminClient.auth.admin.listUsers({ page: 1, perPage: 200 });
+    const partialUser = usersPage?.users?.find((u) => u.email?.toLowerCase() === testEmail);
+    if (partialUser) {
+      await adminClient.auth.admin.deleteUser(partialUser.id);
+      console.log("  [PASS] Cleaned up partial test user record after SMTP error.");
     }
   }
 

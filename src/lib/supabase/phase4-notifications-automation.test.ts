@@ -11,10 +11,12 @@ import {
   isDuplicateNotificationInWindow,
   isNotificationCategoryEnabled,
   normalizeNotificationPreferences,
+  resolveSchedulerConfig,
   resolveTransactionalEmailConfig,
   sanitizeEmailErrorMetadata,
   sanitizeNotificationLink,
   sanitizeNotificationPayload,
+  verifySchedulerRequest,
   verifySchedulerSecret,
 } from "./notification-helper.ts";
 
@@ -148,7 +150,7 @@ test("Notification deduplication detects duplicates within window and allows out
   assert.equal(sig1, sig2);
 });
 
-test("Scheduler secret verification enforces minimum length and constant-time comparison", () => {
+test("Scheduler secret verification enforces minimum length, constant-time comparison, and alias precedence", () => {
   assert.deepEqual(verifySchedulerSecret("Bearer anything", ""), {
     authorized: false,
     reason: "secret_not_configured",
@@ -175,19 +177,130 @@ test("Scheduler secret verification enforces minimum length and constant-time co
     authorized: true,
     reason: "ok",
   });
+
+  // Precedence: CRON_SECRET > WORKFLOW_AUTOMATION_SECRET > AUTOMATION_CRON_SECRET
+  const cronPrimary = "cron-primary-secret-token-123456";
+  const workflowAlias = "workflow-alias-secret-token-123456";
+  const automationAlias = "automation-alias-secret-token-123456";
+
+  const resolvedAllThree = resolveSchedulerConfig({
+    CRON_SECRET: cronPrimary,
+    WORKFLOW_AUTOMATION_SECRET: workflowAlias,
+    AUTOMATION_CRON_SECRET: automationAlias,
+  });
+  assert.equal(resolvedAllThree.configured, true);
+  assert.equal(resolvedAllThree.canonicalVar, "CRON_SECRET");
+  assert.equal(resolvedAllThree.activeSource, "CRON_SECRET");
+  assert.match(resolvedAllThree.reason, /canonical CRON_SECRET/);
+
+  assert.equal(
+    verifySchedulerRequest(`Bearer ${cronPrimary}`, {
+      CRON_SECRET: cronPrimary,
+      WORKFLOW_AUTOMATION_SECRET: workflowAlias,
+      AUTOMATION_CRON_SECRET: automationAlias,
+    }).authorized,
+    true,
+  );
+  assert.equal(
+    verifySchedulerRequest(`Bearer ${workflowAlias}`, {
+      CRON_SECRET: cronPrimary,
+      WORKFLOW_AUTOMATION_SECRET: workflowAlias,
+      AUTOMATION_CRON_SECRET: automationAlias,
+    }).authorized,
+    false,
+  );
+
+  // Fallback to WORKFLOW_AUTOMATION_SECRET when CRON_SECRET is unset
+  const resolvedWorkflowAlias = resolveSchedulerConfig({
+    WORKFLOW_AUTOMATION_SECRET: workflowAlias,
+    AUTOMATION_CRON_SECRET: automationAlias,
+  });
+  assert.equal(resolvedWorkflowAlias.configured, true);
+  assert.equal(resolvedWorkflowAlias.activeSource, "WORKFLOW_AUTOMATION_SECRET");
+  assert.equal(
+    verifySchedulerRequest(`Bearer ${workflowAlias}`, {
+      WORKFLOW_AUTOMATION_SECRET: workflowAlias,
+      AUTOMATION_CRON_SECRET: automationAlias,
+    }).authorized,
+    true,
+  );
+
+  // Fallback to AUTOMATION_CRON_SECRET when CRON_SECRET and WORKFLOW_AUTOMATION_SECRET are unset
+  const resolvedAutomationAlias = resolveSchedulerConfig({
+    AUTOMATION_CRON_SECRET: automationAlias,
+  });
+  assert.equal(resolvedAutomationAlias.configured, true);
+  assert.equal(resolvedAutomationAlias.activeSource, "AUTOMATION_CRON_SECRET");
+  assert.equal(
+    verifySchedulerRequest(`Bearer ${automationAlias}`, {
+      AUTOMATION_CRON_SECRET: automationAlias,
+    }).authorized,
+    true,
+  );
+
+  // Too-short secret is reported truthfully
+  const tooShortConfig = resolveSchedulerConfig({
+    AUTOMATION_CRON_SECRET: "short-secret",
+  });
+  assert.equal(tooShortConfig.configured, false);
+  assert.equal(tooShortConfig.invalidSource, "AUTOMATION_CRON_SECRET");
+  assert.match(tooShortConfig.reason, /16-character minimum/);
 });
 
-test("Transactional email config and error sanitizer never leak credentials or PII", () => {
+test("Transactional email config enforces canonical TRANSACTIONAL_EMAIL_FROM > EMAIL_FROM precedence, rejects direct SMTP vars, and never leaks secrets", () => {
   const unconfigured = resolveTransactionalEmailConfig({});
   assert.equal(unconfigured.configured, false);
   assert.equal(unconfigured.provider, "unconfigured");
+  assert.equal(unconfigured.degradedReason, undefined);
 
   const resendConfig = resolveTransactionalEmailConfig({
     TRANSACTIONAL_EMAIL_FROM: "notifications@thecodexthrill.com",
+    EMAIL_FROM: "legacy@thecodexthrill.com",
     RESEND_API_KEY: "re_test_123456789",
+    TRANSACTIONAL_EMAIL_WEBHOOK_URL: "https://hooks.example.com/email",
   });
   assert.equal(resendConfig.configured, true);
   assert.equal(resendConfig.provider, "resend");
+  assert.equal(resendConfig.fromAddress, "notifications@thecodexthrill.com");
+  assert.equal(resendConfig.fromSource, "TRANSACTIONAL_EMAIL_FROM");
+
+  // Legacy EMAIL_FROM alias works when TRANSACTIONAL_EMAIL_FROM is unset
+  const legacyFromWebhook = resolveTransactionalEmailConfig({
+    EMAIL_FROM: "legacy-sender@thecodexthrill.com",
+    TRANSACTIONAL_EMAIL_WEBHOOK_URL: "https://hooks.example.com/email",
+  });
+  assert.equal(legacyFromWebhook.configured, true);
+  assert.equal(legacyFromWebhook.provider, "webhook");
+  assert.equal(legacyFromWebhook.fromAddress, "legacy-sender@thecodexthrill.com");
+  assert.equal(legacyFromWebhook.fromSource, "EMAIL_FROM");
+
+  // Missing sender address with RESEND_API_KEY present must fail safely
+  const missingSender = resolveTransactionalEmailConfig({
+    RESEND_API_KEY: "re_test_123456789",
+  });
+  assert.equal(missingSender.configured, false);
+  assert.equal(missingSender.degradedReason, "missing_from_address");
+
+  // Invalid webhook URL must fail safely
+  const invalidWebhook = resolveTransactionalEmailConfig({
+    TRANSACTIONAL_EMAIL_FROM: "notifications@thecodexthrill.com",
+    TRANSACTIONAL_EMAIL_WEBHOOK_URL: "ftp://invalid.example.com",
+  });
+  assert.equal(invalidWebhook.configured, false);
+  assert.equal(invalidWebhook.degradedReason, "invalid_webhook_url");
+
+  // Direct SMTP env vars alone must NEVER make the serverless mailer appear configured
+  const smtpOnly = resolveTransactionalEmailConfig({
+    TRANSACTIONAL_EMAIL_FROM: "notifications@thecodexthrill.com",
+    SMTP_HOST: "smtp.example.com",
+    SMTP_PORT: "587",
+    SMTP_USER: "smtp_user",
+    SMTP_PASS: "smtp_secret_pass",
+  });
+  assert.equal(smtpOnly.configured, false);
+  assert.equal(smtpOnly.provider, "unconfigured");
+  assert.equal(smtpOnly.hasUnsupportedSmtpEnv, true);
+  assert.equal(smtpOnly.degradedReason, "unsupported_smtp_only");
 
   const sanitizedErr = sanitizeEmailErrorMetadata({
     code: "http_401",

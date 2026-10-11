@@ -184,6 +184,85 @@ export function isDuplicateNotificationInWindow(params: {
   });
 }
 
+export type SchedulerSecretEnvVar =
+  | "CRON_SECRET"
+  | "WORKFLOW_AUTOMATION_SECRET"
+  | "AUTOMATION_CRON_SECRET";
+
+export const SCHEDULER_SECRET_PRECEDENCE: readonly SchedulerSecretEnvVar[] = [
+  "CRON_SECRET",
+  "WORKFLOW_AUTOMATION_SECRET",
+  "AUTOMATION_CRON_SECRET",
+] as const;
+
+export type SchedulerConfigStatus = {
+  configured: boolean;
+  canonicalVar: "CRON_SECRET";
+  activeSource: SchedulerSecretEnvVar | null;
+  invalidSource: SchedulerSecretEnvVar | null;
+  reason: string;
+};
+
+/**
+ * Resolves the active scheduler secret candidate using strict deterministic precedence:
+ * 1. CRON_SECRET (Canonical)
+ * 2. WORKFLOW_AUTOMATION_SECRET (Legacy alias 1)
+ * 3. AUTOMATION_CRON_SECRET (Legacy alias 2)
+ */
+function pickSchedulerSecretCandidate(
+  env: Record<string, string | undefined>,
+): { source: SchedulerSecretEnvVar | null; value: string } {
+  for (const varName of SCHEDULER_SECRET_PRECEDENCE) {
+    const raw = env[varName]?.trim() ?? "";
+    if (raw.length > 0) {
+      return { source: varName, value: raw };
+    }
+  }
+  return { source: null, value: "" };
+}
+
+/**
+ * Evaluates scheduler configuration status without exposing any secret value.
+ * Used identically by health views, Notification Center, and /api/automation/run.
+ */
+export function resolveSchedulerConfig(
+  env: Record<string, string | undefined>,
+): SchedulerConfigStatus {
+  const candidate = pickSchedulerSecretCandidate(env);
+
+  if (!candidate.source) {
+    return {
+      configured: false,
+      canonicalVar: "CRON_SECRET",
+      activeSource: null,
+      invalidSource: null,
+      reason:
+        "Scheduled workflow automation is unconfigured. Set CRON_SECRET (canonical, minimum 16 characters) in environment configuration.",
+    };
+  }
+
+  if (Buffer.byteLength(candidate.value, "utf8") < 16) {
+    return {
+      configured: false,
+      canonicalVar: "CRON_SECRET",
+      activeSource: null,
+      invalidSource: candidate.source,
+      reason: `${candidate.source} is present but shorter than the required 16-character minimum.`,
+    };
+  }
+
+  return {
+    configured: true,
+    canonicalVar: "CRON_SECRET",
+    activeSource: candidate.source,
+    invalidSource: null,
+    reason:
+      candidate.source === "CRON_SECRET"
+        ? "External scheduled cron sweeps are authorized via canonical CRON_SECRET."
+        : `External scheduled cron sweeps are authorized via legacy alias ${candidate.source} (canonical name: CRON_SECRET).`,
+  };
+}
+
 /**
  * Constant-time verification of scheduler secret for cron/automation endpoints.
  */
@@ -221,6 +300,27 @@ export function verifySchedulerSecret(
     : { authorized: false, reason: "invalid_secret" };
 }
 
+/**
+ * Verifies an incoming scheduler request against the environment using the
+ * exact same canonical precedence as `resolveSchedulerConfig(env)`.
+ */
+export function verifySchedulerRequest(
+  providedHeaderValue: string | null | undefined,
+  env: Record<string, string | undefined>,
+): {
+  authorized: boolean;
+  reason: "ok" | "secret_not_configured" | "invalid_secret";
+  config: SchedulerConfigStatus;
+} {
+  const config = resolveSchedulerConfig(env);
+  const candidate = pickSchedulerSecretCandidate(env);
+  const result = verifySchedulerSecret(providedHeaderValue, candidate.value);
+  return {
+    ...result,
+    config,
+  };
+}
+
 // ============================================================================
 // Transactional Email Pure Helpers
 // ============================================================================
@@ -232,33 +332,133 @@ export type TransactionalEmailStatus =
   | "skipped_by_preference"
   | "suppressed_duplicate";
 
+export type TransactionalEmailFromEnvVar =
+  | "TRANSACTIONAL_EMAIL_FROM"
+  | "EMAIL_FROM";
+
 export type TransactionalEmailConfigStatus = {
   configured: boolean;
   provider: "resend" | "webhook" | "unconfigured";
   fromAddress: string | null;
+  fromSource: TransactionalEmailFromEnvVar | null;
+  canonicalFromVar: "TRANSACTIONAL_EMAIL_FROM";
+  hasResendKey: boolean;
+  hasWebhookUrl: boolean;
+  hasUnsupportedSmtpEnv: boolean;
+  degradedReason?: "missing_from_address" | "invalid_webhook_url" | "unsupported_smtp_only";
   reason?: string;
 };
 
+function isValidHttpWebhookUrl(rawUrl: string): boolean {
+  if (!rawUrl) return false;
+  try {
+    const parsed = new URL(rawUrl);
+    return parsed.protocol === "https:" || parsed.protocol === "http:";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Canonical configuration resolver for outbound business transactional emails:
+ * - Sender precedence: TRANSACTIONAL_EMAIL_FROM (canonical) > EMAIL_FROM (legacy alias)
+ * - Provider precedence: RESEND_API_KEY (primary) > TRANSACTIONAL_EMAIL_WEBHOOK_URL (valid http/https URL)
+ * - Direct SMTP variables (SMTP_HOST/SMTP_PORT/SMTP_USER/SMTP_PASS) are never treated as operational
+ *   because Next.js serverless uses HTTP email providers and Supabase Auth SMTP is managed in Supabase Cloud Dashboard.
+ */
 export function resolveTransactionalEmailConfig(
   env: Record<string, string | undefined>,
 ): TransactionalEmailConfigStatus {
-  const fromAddress = env.TRANSACTIONAL_EMAIL_FROM?.trim() || null;
+  const canonicalFrom = env.TRANSACTIONAL_EMAIL_FROM?.trim() || "";
+  const aliasFrom = env.EMAIL_FROM?.trim() || "";
+  const fromAddress = canonicalFrom || aliasFrom || null;
+  const fromSource: TransactionalEmailFromEnvVar | null = canonicalFrom
+    ? "TRANSACTIONAL_EMAIL_FROM"
+    : aliasFrom
+      ? "EMAIL_FROM"
+      : null;
+
   const resendKey = env.RESEND_API_KEY?.trim() || "";
-  const webhookUrl = env.TRANSACTIONAL_EMAIL_WEBHOOK_URL?.trim() || "";
+  const rawWebhookUrl = env.TRANSACTIONAL_EMAIL_WEBHOOK_URL?.trim() || "";
+  const validWebhookUrl = isValidHttpWebhookUrl(rawWebhookUrl);
+  const hasUnsupportedSmtpEnv = Boolean(
+    env.SMTP_HOST?.trim() ||
+      env.SMTP_PORT?.trim() ||
+      env.SMTP_USER?.trim() ||
+      env.SMTP_PASS?.trim(),
+  );
 
   if (resendKey && fromAddress) {
     return {
       configured: true,
       provider: "resend",
       fromAddress,
+      fromSource,
+      canonicalFromVar: "TRANSACTIONAL_EMAIL_FROM",
+      hasResendKey: true,
+      hasWebhookUrl: validWebhookUrl,
+      hasUnsupportedSmtpEnv,
     };
   }
 
-  if (webhookUrl && fromAddress) {
+  if (validWebhookUrl && fromAddress) {
     return {
       configured: true,
       provider: "webhook",
       fromAddress,
+      fromSource,
+      canonicalFromVar: "TRANSACTIONAL_EMAIL_FROM",
+      hasResendKey: Boolean(resendKey),
+      hasWebhookUrl: true,
+      hasUnsupportedSmtpEnv,
+    };
+  }
+
+  if ((resendKey || validWebhookUrl) && !fromAddress) {
+    return {
+      configured: false,
+      provider: "unconfigured",
+      fromAddress: null,
+      fromSource: null,
+      canonicalFromVar: "TRANSACTIONAL_EMAIL_FROM",
+      hasResendKey: Boolean(resendKey),
+      hasWebhookUrl: validWebhookUrl,
+      hasUnsupportedSmtpEnv,
+      degradedReason: "missing_from_address",
+      reason:
+        "Email provider credentials are present, but TRANSACTIONAL_EMAIL_FROM (canonical sender address; alias EMAIL_FROM) is missing.",
+    };
+  }
+
+  if (rawWebhookUrl && !validWebhookUrl) {
+    return {
+      configured: false,
+      provider: "unconfigured",
+      fromAddress,
+      fromSource,
+      canonicalFromVar: "TRANSACTIONAL_EMAIL_FROM",
+      hasResendKey: Boolean(resendKey),
+      hasWebhookUrl: false,
+      hasUnsupportedSmtpEnv,
+      degradedReason: "invalid_webhook_url",
+      reason:
+        "TRANSACTIONAL_EMAIL_WEBHOOK_URL is not a valid HTTP/HTTPS endpoint URL.",
+    };
+  }
+
+  if (hasUnsupportedSmtpEnv) {
+    return {
+      configured: false,
+      provider: "unconfigured",
+      fromAddress,
+      fromSource,
+      canonicalFromVar: "TRANSACTIONAL_EMAIL_FROM",
+      hasResendKey: false,
+      hasWebhookUrl: false,
+      hasUnsupportedSmtpEnv: true,
+      degradedReason: "unsupported_smtp_only",
+      reason:
+        "Direct SMTP environment variables (SMTP_HOST/SMTP_USER/SMTP_PASS) are not used by the Next.js serverless mailer. Configure TRANSACTIONAL_EMAIL_FROM with RESEND_API_KEY or TRANSACTIONAL_EMAIL_WEBHOOK_URL for business emails; configure Auth SMTP in the Supabase Cloud Dashboard.",
     };
   }
 
@@ -266,6 +466,11 @@ export function resolveTransactionalEmailConfig(
     configured: false,
     provider: "unconfigured",
     fromAddress,
+    fromSource,
+    canonicalFromVar: "TRANSACTIONAL_EMAIL_FROM",
+    hasResendKey: false,
+    hasWebhookUrl: false,
+    hasUnsupportedSmtpEnv: false,
     reason:
       "Transactional email provider is not configured (requires TRANSACTIONAL_EMAIL_FROM and RESEND_API_KEY or TRANSACTIONAL_EMAIL_WEBHOOK_URL; Supabase Auth SMTP is configured separately in Supabase Dashboard).",
   };

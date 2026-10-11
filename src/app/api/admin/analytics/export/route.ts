@@ -134,7 +134,6 @@ export async function GET(request: Request) {
     adminClient
       .from("organization_memberships")
       .select("organization_id, status")
-      .eq("status", "active")
       .limit(1000),
     supabase.rpc("list_platform_users"),
     supabase.rpc("list_platform_invitations"),
@@ -167,8 +166,18 @@ export async function GET(request: Request) {
       .limit(25),
   ]);
 
+  const allPrimaryDatasetsFailed = Boolean(
+    leadsResult.error &&
+      orgsResult.error &&
+      projectsResult.error &&
+      tasksResult.error &&
+      invoicesResult.error &&
+      ticketsResult.error,
+  );
+
   // Never produce false-success CSV exports when required underlying dataset failed
   if (
+    (reportType === "executive_summary" && allPrimaryDatasetsFailed) ||
     (reportType === "leads" && leadsResult.error) ||
     (reportType === "invoices" && invoicesResult.error) ||
     (reportType === "projects_tasks" && (projectsResult.error || tasksResult.error)) ||

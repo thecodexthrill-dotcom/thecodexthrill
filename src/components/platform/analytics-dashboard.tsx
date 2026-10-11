@@ -146,8 +146,17 @@ export function AnalyticsDashboard({ data }: { data: AnalyticsData }) {
   }, [exportReportType, timeRange, customStart, customEnd]);
 
   const handleInstantCsvDownload = () => {
+    const allPrimaryUnavailable =
+      data.leads === null &&
+      data.organizations === null &&
+      data.projects === null &&
+      data.tasks === null &&
+      data.invoices === null &&
+      data.tickets === null;
+
     // Check if the required dataset for this report is unavailable
     if (
+      (exportReportType === "executive_summary" && allPrimaryUnavailable) ||
       (exportReportType === "leads" && data.leads === null) ||
       (exportReportType === "invoices" && data.invoices === null) ||
       (exportReportType === "projects_tasks" &&

@@ -1,4 +1,10 @@
-import { resolveTransactionalEmailConfig } from "./notification-helper.ts";
+import {
+  type SchedulerConfigStatus,
+  resolveSchedulerConfig,
+  resolveTransactionalEmailConfig,
+} from "./notification-helper.ts";
+
+export { type SchedulerConfigStatus, resolveSchedulerConfig };
 
 // ============================================================================
 // 1. Sanitized Operational Logging & Secret / PII Redaction
@@ -314,17 +320,15 @@ export function resolvePlatformIntegrationStatus(
   env: Record<string, string | undefined>,
 ): PlatformIntegrationStatus {
   const hasSupabaseUrl = Boolean(env.NEXT_PUBLIC_SUPABASE_URL?.trim());
-  const hasAnonKey = Boolean(
-    env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY?.trim() ||
-      env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim(),
+  const hasPublishableKey = Boolean(
+    env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY?.trim(),
   );
-  const hasServiceRoleKey = Boolean(
-    env.SUPABASE_SECRET_KEY?.trim() || env.SUPABASE_SERVICE_ROLE_KEY?.trim(),
-  );
+  const hasSecretKey = Boolean(env.SUPABASE_SECRET_KEY?.trim());
 
   const supabaseFullyConfigured =
-    hasSupabaseUrl && hasAnonKey && hasServiceRoleKey;
-  const supabasePartiallyConfigured = hasSupabaseUrl && hasAnonKey;
+    hasSupabaseUrl && hasPublishableKey && hasSecretKey;
+  const supabasePartiallyConfigured =
+    hasSupabaseUrl || hasPublishableKey || hasSecretKey;
 
   const supabaseCloud: IntegrationStatusItem = {
     id: "supabase_cloud",
@@ -337,31 +341,35 @@ export function resolvePlatformIntegrationStatus(
     statusLabel: supabaseFullyConfigured
       ? "Configured (Active)"
       : supabasePartiallyConfigured
-        ? "Degraded (Service Key Missing)"
+        ? "Degraded (Incomplete Keys)"
         : "Unconfigured",
     providerLabel: "Supabase PostgreSQL + Auth",
     configPresence: {
       NEXT_PUBLIC_SUPABASE_URL: hasSupabaseUrl,
-      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: hasAnonKey,
-      SUPABASE_SECRET_KEY: hasServiceRoleKey,
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: hasPublishableKey,
+      SUPABASE_SECRET_KEY: hasSecretKey,
     },
     summary: supabaseFullyConfigured
       ? "Database, Row-Level Security, and server administration bindings are configured."
-      : "One or more required Supabase Cloud environment keys are missing.",
+      : "One or more required Supabase Cloud environment keys (NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY, SUPABASE_SECRET_KEY) are missing.",
   };
 
   const emailConfig = resolveTransactionalEmailConfig(env);
-  const hasEmailFrom = Boolean(env.TRANSACTIONAL_EMAIL_FROM?.trim());
-  const hasResendKey = Boolean(env.RESEND_API_KEY?.trim());
-  const hasWebhookUrl = Boolean(env.TRANSACTIONAL_EMAIL_WEBHOOK_URL?.trim());
+  const emailDegraded = Boolean(emailConfig.degradedReason);
 
   const transactionalEmail: IntegrationStatusItem = {
     id: "transactional_email",
     name: "Transactional Business Email",
-    status: emailConfig.configured ? "configured" : "unconfigured",
+    status: emailConfig.configured
+      ? "configured"
+      : emailDegraded
+        ? "degraded"
+        : "unconfigured",
     statusLabel: emailConfig.configured
       ? `Configured (${emailConfig.provider.toUpperCase()})`
-      : "Unavailable (In-App Primary)",
+      : emailDegraded
+        ? "Degraded (Incomplete / Invalid Config)"
+        : "Unavailable (In-App Primary)",
     providerLabel:
       emailConfig.provider === "resend"
         ? "Resend API"
@@ -369,13 +377,15 @@ export function resolvePlatformIntegrationStatus(
           ? "Custom Webhook"
           : "Unconfigured",
     configPresence: {
-      TRANSACTIONAL_EMAIL_FROM: hasEmailFrom,
-      RESEND_API_KEY: hasResendKey,
-      TRANSACTIONAL_EMAIL_WEBHOOK_URL: hasWebhookUrl,
+      TRANSACTIONAL_EMAIL_FROM: Boolean(env.TRANSACTIONAL_EMAIL_FROM?.trim()),
+      EMAIL_FROM_ALIAS: Boolean(env.EMAIL_FROM?.trim()),
+      RESEND_API_KEY: emailConfig.hasResendKey,
+      TRANSACTIONAL_EMAIL_WEBHOOK_URL: emailConfig.hasWebhookUrl,
     },
     summary: emailConfig.configured
-      ? `Outbound business emails are enabled via ${emailConfig.provider} (sender configured).`
-      : "Optional external email provider is not configured. All workspace alerts deliver reliably via in-app Notification Center.",
+      ? `Outbound business emails are enabled via ${emailConfig.provider} (sender resolved from ${emailConfig.fromSource ?? "TRANSACTIONAL_EMAIL_FROM"}).`
+      : (emailConfig.reason ??
+          "Optional external email provider is not configured. All workspace alerts deliver reliably via in-app Notification Center."),
   };
 
   const customAuthSmtpFlag =
@@ -384,61 +394,87 @@ export function resolvePlatformIntegrationStatus(
   const authSmtp: IntegrationStatusItem = {
     id: "auth_smtp",
     name: "Supabase Auth & Invitation SMTP",
-    status: customAuthSmtpFlag ? "configured" : "degraded",
-    statusLabel: customAuthSmtpFlag
-      ? "Custom Auth SMTP Active"
-      : "Supabase Cloud Managed (Default Rate-Limited)",
-    providerLabel: customAuthSmtpFlag
-      ? "Custom SMTP (Supabase Auth)"
-      : "Supabase Built-in Auth Mailer",
+    status: !supabaseFullyConfigured
+      ? "unconfigured"
+      : customAuthSmtpFlag
+        ? "configured"
+        : "degraded",
+    statusLabel: !supabaseFullyConfigured
+      ? "Unconfigured"
+      : customAuthSmtpFlag
+        ? "Custom Auth SMTP Active"
+        : "Supabase Cloud Managed (Default Rate-Limited)",
+    providerLabel: !supabaseFullyConfigured
+      ? "Unconfigured"
+      : customAuthSmtpFlag
+        ? "Custom SMTP (Supabase Auth)"
+        : "Supabase Built-in Auth Mailer",
     configPresence: {
-      SUPABASE_AUTH_ENABLED: hasSupabaseUrl && hasServiceRoleKey,
+      SUPABASE_AUTH_ENABLED: supabaseFullyConfigured,
       SUPABASE_CUSTOM_SMTP_CONFIGURED: customAuthSmtpFlag,
     },
-    summary: customAuthSmtpFlag
-      ? "Custom SMTP provider is marked active in Supabase Cloud Auth."
-      : "Managed in Supabase Dashboard. If custom SMTP is not yet bound in Supabase Auth settings, invitations remain safely tracked in pending state.",
+    summary: !supabaseFullyConfigured
+      ? "Requires Supabase Cloud URL and SUPABASE_SECRET_KEY before Auth invitations can be issued."
+      : customAuthSmtpFlag
+        ? "Custom SMTP provider is marked active in Supabase Cloud Auth."
+        : "Managed in Supabase Dashboard (Authentication -> SMTP Settings). Until custom SMTP is bound in Supabase Cloud, invitations remain safely tracked in pending state.",
   };
 
-  const cronSecretLen = env.CRON_SECRET?.trim().length ?? 0;
-  const workflowSecretLen = env.WORKFLOW_AUTOMATION_SECRET?.trim().length ?? 0;
-  const schedulerConfigured = cronSecretLen >= 16 || workflowSecretLen >= 16;
-  const secretSource =
-    cronSecretLen >= 16
-      ? "CRON_SECRET"
-      : workflowSecretLen >= 16
-        ? "WORKFLOW_AUTOMATION_SECRET"
-        : "none";
+  const schedulerConfig = resolveSchedulerConfig(env);
+  const cronSecretLen = Buffer.byteLength(env.CRON_SECRET?.trim() ?? "", "utf8");
+  const workflowSecretLen = Buffer.byteLength(
+    env.WORKFLOW_AUTOMATION_SECRET?.trim() ?? "",
+    "utf8",
+  );
+  const automationCronSecretLen = Buffer.byteLength(
+    env.AUTOMATION_CRON_SECRET?.trim() ?? "",
+    "utf8",
+  );
 
   const workflowScheduler: IntegrationStatusItem = {
     id: "workflow_scheduler",
     name: "Workflow Automation Scheduler",
-    status: schedulerConfigured ? "configured" : "unconfigured",
-    statusLabel: schedulerConfigured
-      ? `Configured (${secretSource})`
-      : "Unconfigured (Manual Sweep Only)",
+    status: schedulerConfig.configured
+      ? "configured"
+      : schedulerConfig.invalidSource
+        ? "degraded"
+        : "unconfigured",
+    statusLabel: schedulerConfig.configured
+      ? `Configured (${schedulerConfig.activeSource})`
+      : schedulerConfig.invalidSource
+        ? `Degraded (${schedulerConfig.invalidSource} < 16 chars)`
+        : "Unconfigured (Manual Sweep Only)",
     providerLabel: "Cron / /api/automation/run",
     configPresence: {
       CRON_SECRET_MIN_16_CHARS: cronSecretLen >= 16,
       WORKFLOW_AUTOMATION_SECRET_MIN_16_CHARS: workflowSecretLen >= 16,
+      AUTOMATION_CRON_SECRET_MIN_16_CHARS: automationCronSecretLen >= 16,
       endpoint: "/api/automation/run",
     },
-    summary: schedulerConfigured
-      ? "External scheduled cron sweeps are authorized via constant-time bearer secret verification."
-      : "External cron endpoint returns HTTP 503 until CRON_SECRET (>= 16 chars) is set. Manual admin sweeps remain operational.",
+    summary: schedulerConfig.configured
+      ? `${schedulerConfig.reason} Constant-time bearer secret verification active.`
+      : `${schedulerConfig.reason} External cron endpoint returns HTTP 503 until configured; manual admin sweeps remain operational.`,
   };
 
   const hasVapidPublic = Boolean(env.NEXT_PUBLIC_VAPID_PUBLIC_KEY?.trim());
   const hasVapidPrivate = Boolean(env.VAPID_PRIVATE_KEY?.trim());
   const pushConfigured = hasVapidPublic && hasVapidPrivate;
+  const pushPartiallyConfigured =
+    (hasVapidPublic || hasVapidPrivate) && !pushConfigured;
 
   const webPush: IntegrationStatusItem = {
     id: "web_push",
     name: "Browser Web Push (Optional)",
-    status: pushConfigured ? "configured" : "unconfigured",
+    status: pushConfigured
+      ? "configured"
+      : pushPartiallyConfigured
+        ? "degraded"
+        : "unconfigured",
     statusLabel: pushConfigured
       ? "Configured (VAPID Ready)"
-      : "Not Configured (Disabled)",
+      : pushPartiallyConfigured
+        ? "Degraded (Partial VAPID Keys)"
+        : "Not Configured (Disabled)",
     providerLabel: "W3C Web Push / VAPID",
     configPresence: {
       NEXT_PUBLIC_VAPID_PUBLIC_KEY: hasVapidPublic,
@@ -446,7 +482,9 @@ export function resolvePlatformIntegrationStatus(
     },
     summary: pushConfigured
       ? "VAPID public and private keys are present in environment configuration."
-      : "Optional browser push notifications are disabled until VAPID keys are configured.",
+      : pushPartiallyConfigured
+        ? "Both NEXT_PUBLIC_VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY are required to enable Web Push."
+        : "Optional browser push notifications are disabled until VAPID keys are configured.",
   };
 
   const storageBucket: IntegrationStatusItem = {

@@ -10,6 +10,7 @@ import { invitationListFailureMessage, safeInvitationListErrorCode } from "@/lib
 import {
   logSanitizedOperationalEvent,
   resolvePlatformIntegrationStatus,
+  resolveSchedulerConfig,
 } from "@/lib/supabase/platform-health-helper";
 import { signOutAction } from "@/lib/supabase/actions";
 import {
@@ -1080,7 +1081,7 @@ export async function WorkspaceContent({
         ? null
         : ((membershipsResult.data ?? []) as NonNullable<AnalyticsData["memberships"]>),
       staffCount: usersResult.error ? null : ((usersResult.data ?? []) as unknown[]).length,
-      pendingInvitesCount: invitesList ? invitesList.filter((i) => i.status === "pending").length : null,
+      pendingInvitesCount: invitesList ? invitesList.filter((i) => i.status === "pending" && !i.archived_at).length : null,
       invitations: invitesList,
       projects: projectsResult.error ? null : ((projectsResult.data ?? []) as NonNullable<AnalyticsData["projects"]>),
       tasks: tasksResult.error ? null : ((tasksResult.data ?? []) as NonNullable<AnalyticsData["tasks"]>),
@@ -1214,11 +1215,8 @@ export async function WorkspaceContent({
       user?.user_metadata?.notification_preferences,
     );
     const emailConfig = getTransactionalEmailConfigStatus();
-    const configuredCronSecret =
-      process.env.CRON_SECRET?.trim() ||
-      process.env.WORKFLOW_AUTOMATION_SECRET?.trim() ||
-      "";
-    const schedulerConfigured = configuredCronSecret.length >= 16;
+    const schedulerConfig = resolveSchedulerConfig(process.env);
+    const integrationStatus = resolvePlatformIntegrationStatus(process.env);
     const canRunAutomation =
       kind === "admin" &&
       roles.some((r) =>
@@ -1231,7 +1229,9 @@ export async function WorkspaceContent({
         notifications={notifications}
         preferences={preferences}
         emailConfig={emailConfig}
-        schedulerConfigured={schedulerConfigured}
+        schedulerConfigured={schedulerConfig.configured}
+        schedulerConfig={schedulerConfig}
+        webPushConfigured={integrationStatus.webPush.status === "configured"}
         canRunAutomation={canRunAutomation}
         userEmail={user?.email ?? "Account"}
         roles={roles}

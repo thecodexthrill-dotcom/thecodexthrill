@@ -100,6 +100,46 @@ assert(
   proxyContent.includes("/admin/:path*") && proxyContent.includes("/portal/:path*")
 );
 
+// 6. Verify Phase 6 Required Routes & Authorization Boundaries
+const requiredRouteFiles = [
+  { route: "/", file: ["src", "app", "page.tsx"] },
+  { route: "/services", file: ["src", "app", "services", "page.tsx"] },
+  { route: "/portfolio", file: ["src", "app", "portfolio", "page.tsx"] },
+  { route: "/contact", file: ["src", "app", "contact", "page.tsx"] },
+  { route: "/login", file: ["src", "app", "login", "page.tsx"] },
+  { route: "/admin (and /admin/analytics, /admin/settings, /admin/notifications)", file: ["src", "app", "admin", "[[...section]]", "page.tsx"] },
+  { route: "/portal", file: ["src", "app", "portal", "[[...section]]", "page.tsx"] },
+  { route: "/api/automation/run", file: ["src", "app", "api", "automation", "run", "route.ts"] },
+  { route: "/api/admin/analytics/export", file: ["src", "app", "api", "admin", "analytics", "export", "route.ts"] },
+];
+
+for (const item of requiredRouteFiles) {
+  const fullPath = join(process.cwd(), ...item.file);
+  const content = readFileSync(fullPath, "utf-8");
+  assert(`Required route handler exists and is non-empty: ${item.route}`, content.length > 50);
+}
+
+const accessContent = readFileSync(join(process.cwd(), "src", "lib", "supabase", "access.ts"), "utf-8");
+assert(
+  "Workspace access guard enforces authentication, section RBAC (/admin/analytics, /admin/settings, /admin/notifications), and MFA AAL2",
+  accessContent.includes('redirect("/login")') &&
+    accessContent.includes('analytics: ["super_admin", "platform_admin"]') &&
+    accessContent.includes('settings: ["super_admin", "platform_admin"]') &&
+    accessContent.includes('notifications: ["super_admin", "platform_admin", "developer", "support_staff"]') &&
+    accessContent.includes('assurance?.currentLevel !== "aal2"')
+);
+
+const automationRouteContent = readFileSync(
+  join(process.cwd(), "src", "app", "api", "automation", "run", "route.ts"),
+  "utf-8"
+);
+assert(
+  "/api/automation/run uses canonical verifySchedulerRequest and returns 503 when unconfigured / 401 when unauthorized",
+  automationRouteContent.includes("verifySchedulerRequest") &&
+    automationRouteContent.includes("status: 503") &&
+    automationRouteContent.includes("status: 401")
+);
+
 console.log("============================================================");
 console.log(`SUMMARY: ${passed} PASSED, ${failed} FAILED`);
 console.log("============================================================");

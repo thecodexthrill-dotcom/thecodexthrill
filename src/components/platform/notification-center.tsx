@@ -5,6 +5,7 @@ import Link from "next/link";
 import {
   type NotificationCategory,
   type NotificationPreferences,
+  type SchedulerConfigStatus,
   type TransactionalEmailConfigStatus,
   sanitizeNotificationLink,
   sanitizeNotificationPayload,
@@ -35,6 +36,8 @@ export function NotificationCenter({
   preferences,
   emailConfig,
   schedulerConfigured,
+  schedulerConfig,
+  webPushConfigured = false,
   canRunAutomation,
   userEmail,
   roles,
@@ -47,6 +50,8 @@ export function NotificationCenter({
   preferences: NotificationPreferences;
   emailConfig: TransactionalEmailConfigStatus;
   schedulerConfigured: boolean;
+  schedulerConfig?: SchedulerConfigStatus;
+  webPushConfigured?: boolean;
   canRunAutomation: boolean;
   userEmail: string;
   roles: string[];
@@ -505,9 +510,13 @@ export function NotificationCenter({
             </div>
             <div style={{ color: "var(--muted)" }}>
               <strong>Scheduler Secret Status:</strong>{" "}
-              {schedulerConfigured
-                ? "Configured (CRON_SECRET / WORKFLOW_AUTOMATION_SECRET active)"
-                : "Unconfigured in environment — external cron requests are rejected with HTTP 503 until CRON_SECRET (min 16 chars) is set. Manual admin sweeps remain available above."}
+              {schedulerConfig
+                ? schedulerConfig.configured
+                  ? `Configured (${schedulerConfig.activeSource ?? "CRON_SECRET"} active)`
+                  : `${schedulerConfig.reason} External cron requests are rejected with HTTP 503 until configured. Manual admin sweeps remain available above.`
+                : schedulerConfigured
+                  ? "Configured (CRON_SECRET active)"
+                  : "Unconfigured in environment — external cron requests are rejected with HTTP 503 until CRON_SECRET (canonical, min 16 chars) is set. Manual admin sweeps remain available above."}
             </div>
           </div>
         </section>
@@ -689,10 +698,20 @@ export function NotificationCenter({
           <div className="activity-row">
             <span className="activity-dot" />
             <div>
-              <strong>Browser Web Push Status: Not Configured</strong>
+              <strong>
+                Browser Web Push Status:{" "}
+                {webPushConfigured ? "Configured (VAPID Ready)" : "Not Configured"}
+              </strong>
               <p style={{ margin: "2px 0", color: "var(--muted)" }}>
-                Web Push delivery is disabled until VAPID keys (<code>NEXT_PUBLIC_VAPID_PUBLIC_KEY</code>,{" "}
-                <code>VAPID_PRIVATE_KEY</code>) and a push subscription table are provisioned.
+                {webPushConfigured
+                  ? "VAPID public and private keys are present in environment configuration."
+                  : (
+                    <>
+                      Web Push delivery is disabled until VAPID keys (
+                      <code>NEXT_PUBLIC_VAPID_PUBLIC_KEY</code>,{" "}
+                      <code>VAPID_PRIVATE_KEY</code>) are provisioned.
+                    </>
+                  )}
               </p>
             </div>
           </div>

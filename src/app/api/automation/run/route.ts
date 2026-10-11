@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { verifySchedulerSecret } from "@/lib/supabase/notification-helper";
+import { verifySchedulerRequest } from "@/lib/supabase/notification-helper";
 import {
   logSanitizedOperationalEvent,
   sanitizeOperationalString,
@@ -10,13 +10,14 @@ import { runWorkflowAutomationSweep } from "@/lib/supabase/workflow-automation";
 export const dynamic = "force-dynamic";
 
 async function handleAutomationRequest(request: Request) {
-  const configuredSecret =
-    process.env.CRON_SECRET || process.env.WORKFLOW_AUTOMATION_SECRET || "";
   const providedSecret =
     request.headers.get("authorization") ||
     request.headers.get("x-automation-secret");
 
-  const verification = verifySchedulerSecret(providedSecret, configuredSecret);
+  const verification = verifySchedulerRequest(
+    providedSecret,
+    process.env as Record<string, string | undefined>,
+  );
 
   if (!verification.authorized) {
     logSanitizedOperationalEvent({
@@ -30,7 +31,8 @@ async function handleAutomationRequest(request: Request) {
       metadata: {
         reason: verification.reason,
         headerPresent: Boolean(providedSecret),
-        secretConfigured: verification.reason !== "secret_not_configured",
+        secretConfigured: verification.config.configured,
+        activeSource: verification.config.activeSource ?? "none",
       },
       throttleKey: `scheduler.auth.${verification.reason}`,
     });
@@ -41,7 +43,7 @@ async function handleAutomationRequest(request: Request) {
           ok: false,
           error: "scheduler_secret_not_configured",
           message:
-            "Scheduled workflow automation requires CRON_SECRET or WORKFLOW_AUTOMATION_SECRET (minimum 16 characters) in environment configuration.",
+            "Scheduled workflow automation requires CRON_SECRET (canonical, minimum 16 characters; legacy aliases WORKFLOW_AUTOMATION_SECRET or AUTOMATION_CRON_SECRET) in environment configuration.",
         },
         { status: 503 },
       );

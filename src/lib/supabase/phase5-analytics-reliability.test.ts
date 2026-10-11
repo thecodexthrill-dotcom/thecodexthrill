@@ -562,7 +562,7 @@ test("Sanitized operational logging redacts secrets and PII while throttling rep
   assert.doesNotMatch(logRes.entry.message, /admin@example\.com/);
 });
 
-test("Platform integration status reports configuration presence without leaking secret values", () => {
+test("Platform integration status reports configuration presence without leaking secret values and shares canonical resolvers", () => {
   const fakeEnv = {
     NEXT_PUBLIC_SUPABASE_URL: "https://isgoypmebtoipfvtaflg.supabase.co",
     NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "sb_publishable_testkey12345",
@@ -587,6 +587,36 @@ test("Platform integration status reports configuration presence without leaking
   assert.equal(status.workflowScheduler.status, "configured");
   assert.equal(status.authSmtp.status, "configured");
   assert.equal(status.webPush.status, "unconfigured");
+
+  // Verify legacy aliases (EMAIL_FROM + AUTOMATION_CRON_SECRET) are honored identically by health status
+  const legacyEnv = {
+    NEXT_PUBLIC_SUPABASE_URL: "https://isgoypmebtoipfvtaflg.supabase.co",
+    NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "sb_publishable_testkey12345",
+    SUPABASE_SECRET_KEY: "sb_secret_super_sensitive_value_do_not_leak",
+    EMAIL_FROM: "legacy-sender@thecodexthrill.com",
+    TRANSACTIONAL_EMAIL_WEBHOOK_URL: "https://hooks.example.com/email",
+    AUTOMATION_CRON_SECRET: "automation_legacy_secret_value_999",
+  };
+  const legacyStatus = resolvePlatformIntegrationStatus(legacyEnv);
+  assert.equal(legacyStatus.transactionalEmail.status, "configured");
+  assert.match(legacyStatus.transactionalEmail.summary, /sender resolved from EMAIL_FROM/);
+  assert.equal(legacyStatus.workflowScheduler.status, "configured");
+  assert.match(legacyStatus.workflowScheduler.summary, /AUTOMATION_CRON_SECRET/);
+  assert.equal(legacyStatus.authSmtp.status, "degraded");
+
+  // Verify unsupported SMTP_HOST env vars never make transactionalEmail appear configured
+  const smtpEnv = {
+    TRANSACTIONAL_EMAIL_FROM: "notifications@thecodexthrill.com",
+    SMTP_HOST: "smtp.example.com",
+    SMTP_PASS: "super_secret_smtp_password",
+    CRON_SECRET: "too-short",
+  };
+  const smtpStatus = resolvePlatformIntegrationStatus(smtpEnv);
+  assert.doesNotMatch(JSON.stringify(smtpStatus), /super_secret_smtp_password/);
+  assert.equal(smtpStatus.transactionalEmail.status, "degraded");
+  assert.match(smtpStatus.transactionalEmail.summary, /SMTP environment variables/);
+  assert.equal(smtpStatus.workflowScheduler.status, "degraded");
+  assert.match(smtpStatus.workflowScheduler.summary, /16-character minimum/);
 });
 
 test("Automation job health detects consecutive failures, degraded runs, and healthy sweeps", () => {
@@ -649,6 +679,7 @@ test("CSV export endpoint and Phase 5 migration enforce RBAC, MFA AAL2, and non-
   assert.match(phase5Migration, /create index if not exists platform_sales_leads_analytics_created_lookup/);
   assert.match(phase5Migration, /create index if not exists tenant_tasks_open_due_date_lookup/);
   assert.match(phase5Migration, /create index if not exists tenant_invoices_analytics_created_lookup/);
+  assert.match(phase5Migration, /create index if not exists tenant_invoices_open_due_date_lookup/);
   assert.match(phase5Migration, /create index if not exists audit_events_platform_automation_lookup/);
   assert.doesNotMatch(phase5Migration, /drop\s+table|truncate|delete\s+from|alter\s+table.*disable\s+row\s+level\s+security/i);
 });

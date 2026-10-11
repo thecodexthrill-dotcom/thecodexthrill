@@ -25,6 +25,10 @@ create index if not exists tenant_tasks_created_at_lookup
 create index if not exists tenant_invoices_analytics_created_lookup
   on public.tenant_invoices (created_at desc, status, due_date);
 
+create index if not exists tenant_invoices_open_due_date_lookup
+  on public.tenant_invoices (due_date asc, status)
+  where status in ('issued', 'overdue') and due_date is not null;
+
 -- 4. Platform observability: automation sweep & failure health checks
 create index if not exists audit_events_platform_automation_lookup
   on public.audit_events (action, occurred_at desc)
