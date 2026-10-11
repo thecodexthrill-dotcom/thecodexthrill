@@ -1,36 +1,110 @@
 export default function AdminWorkspaceLoading() {
   return (
-    <main
+    <div
       aria-busy="true"
       aria-live="polite"
-      className="min-h-screen bg-[#070B19] text-slate-100 p-4 sm:p-8"
+      className="platform-shell admin-shell workspace-loading-shell"
     >
-      <div className="max-w-7xl mx-auto space-y-6 animate-pulse">
-        <div className="rounded-3xl border border-white/10 bg-slate-950/60 p-6 sm:p-8">
-          <div className="h-3 w-40 rounded bg-indigo-500/30 mb-3" />
-          <div className="h-8 w-72 rounded bg-white/15 mb-2" />
-          <div className="h-4 w-96 max-w-full rounded bg-white/10" />
+      <aside aria-hidden="true" className="platform-sidebar">
+        <div className="sidebar-brand-row">
+          <div className="platform-brand">
+            <span className="platform-mark">
+              T<span>C</span>
+            </span>
+            <span>
+              TheCodex<span>Thrill</span>
+            </span>
+          </div>
         </div>
-
-        <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
-          {[1, 2, 3, 4].map((slot) => (
-            <div
-              key={slot}
-              className="rounded-2xl border border-white/10 bg-white/[0.03] p-5 space-y-3"
-            >
-              <div className="h-3 w-28 rounded bg-white/10" />
-              <div className="h-7 w-24 rounded bg-white/15" />
-              <div className="h-3 w-36 rounded bg-white/10" />
+        <p className="sidebar-caption">PLATFORM</p>
+        <div className="platform-nav">
+          {[1, 2, 3, 4, 5, 6, 7, 8].map((item) => (
+            <div className="workspace-skeleton-nav-item" key={item}>
+              <span className="workspace-skeleton-dot" />
+              <span className="workspace-skeleton-bar" style={{ width: `${52 + (item % 3) * 14}%` }} />
             </div>
           ))}
         </div>
-
-        <div className="grid gap-6 grid-cols-1 lg:grid-cols-2">
-          <div className="rounded-3xl border border-white/10 bg-slate-950/60 p-6 h-64" />
-          <div className="rounded-3xl border border-white/10 bg-slate-950/60 p-6 h-64" />
+        <div className="sidebar-footer">
+          <span className="connection-dot" /> Synchronizing workspace…
         </div>
+      </aside>
+
+      <div className="platform-main">
+        <header className="platform-topbar">
+          <div className="platform-brand">
+            <span className="platform-mark">
+              T<span>C</span>
+            </span>
+            <span>
+              TheCodex<span>Thrill</span>
+            </span>
+          </div>
+          <div className="platform-search" style={{ opacity: 0.7 }}>
+            <span className="workspace-skeleton-bar" style={{ width: "160px", height: "12px" }} />
+          </div>
+          <div className="platform-top-actions">
+            <span className="workspace-skeleton-pill" />
+            <span className="workspace-skeleton-pill" style={{ width: "120px" }} />
+          </div>
+        </header>
+
+        <main className="platform-page" id="main-content">
+          <div className="platform-page-heading">
+            <div style={{ width: "100%" }}>
+              <p className="eyebrow">ADMIN WORKSPACE · SYNCHRONIZING</p>
+              <div
+                className="workspace-skeleton-bar workspace-skeleton-title"
+                style={{ width: "240px", height: "28px", marginTop: "8px" }}
+              />
+              <div
+                className="workspace-skeleton-bar"
+                style={{ width: "360px", maxWidth: "90%", height: "14px", marginTop: "10px" }}
+              />
+            </div>
+          </div>
+
+          <div className="workspace-content">
+            <div className="um-summary-grid">
+              {[1, 2, 3, 4].map((slot) => (
+                <div className="um-summary-card workspace-skeleton-card" key={slot}>
+                  <div className="workspace-skeleton-bar" style={{ width: "45%", height: "11px" }} />
+                  <div
+                    className="workspace-skeleton-bar"
+                    style={{ width: "60%", height: "24px", marginTop: "10px" }}
+                  />
+                  <div
+                    className="workspace-skeleton-bar"
+                    style={{ width: "75%", height: "11px", marginTop: "10px" }}
+                  />
+                </div>
+              ))}
+            </div>
+
+            <section className="module-panel workspace-skeleton-panel">
+              <div className="workspace-skeleton-bar" style={{ width: "140px", height: "11px" }} />
+              <div
+                className="workspace-skeleton-bar"
+                style={{ width: "260px", height: "22px", marginTop: "10px" }}
+              />
+              <div
+                className="workspace-skeleton-bar"
+                style={{ width: "420px", maxWidth: "100%", height: "13px", marginTop: "10px" }}
+              />
+              <div className="workspace-skeleton-table" style={{ marginTop: "20px" }}>
+                {[1, 2, 3, 4].map((row) => (
+                  <div className="workspace-skeleton-row" key={row}>
+                    <span className="workspace-skeleton-bar" style={{ width: "28%" }} />
+                    <span className="workspace-skeleton-bar" style={{ width: "18%" }} />
+                    <span className="workspace-skeleton-bar" style={{ width: "22%" }} />
+                    <span className="workspace-skeleton-bar" style={{ width: "16%" }} />
+                  </div>
+                ))}
+              </div>
+            </section>
+          </div>
+        </main>
       </div>
-    </main>
+    </div>
   );
 }
-

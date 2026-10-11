@@ -14,9 +14,14 @@ export function resolveAppOrigin(localFallback?: string): URL | null {
   let configuredOrigin: string | undefined;
 
   if (isPreview) {
-    const deploymentHost = process.env.VERCEL_URL;
-    if (!deploymentHost || !/^[a-z0-9.-]+\.vercel\.app$/i.test(deploymentHost)) return null;
-    configuredOrigin = `https://${deploymentHost}`;
+    const usePreviewRedirect = Boolean(localFallback) || process.env.VERCEL_PREVIEW_AUTH_REDIRECT_ENABLED === "true";
+    if (usePreviewRedirect) {
+      const deploymentHost = process.env.VERCEL_URL;
+      if (!deploymentHost || !/^[a-z0-9.-]+\.vercel\.app$/i.test(deploymentHost)) return null;
+      configuredOrigin = `https://${deploymentHost}`;
+    } else {
+      configuredOrigin = SITE_ORIGIN;
+    }
   } else if (isProduction) {
     const appBaseUrl = process.env.APP_BASE_URL;
     if (!appBaseUrl) return null;

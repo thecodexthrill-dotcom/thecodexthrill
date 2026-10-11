@@ -27,12 +27,14 @@ const copy: Record<AuthMode, { eyebrow: string; title: string; description: stri
 export function AuthPanel({
   mode,
   invitationVerified = false,
+  inviteStatus,
   passwordResetVerified = false,
   passwordResetLinkInvalid = false,
   logoutError = false,
 }: {
   mode: AuthMode;
   invitationVerified?: boolean;
+  inviteStatus?: string;
   passwordResetVerified?: boolean;
   passwordResetLinkInvalid?: boolean;
   logoutError?: boolean;
@@ -50,6 +52,36 @@ export function AuthPanel({
     ? invitationVerified
     : mode === "reset" ? passwordResetVerified : true;
 
+  const inviteHoldCopy = inviteStatus === "expired"
+    ? {
+        title: "Invitation link expired",
+        body: "This single-use invitation link has expired. Ask a Super Admin or Platform Admin to resend your invitation from the Team workspace.",
+      }
+    : inviteStatus === "used"
+      ? {
+          title: "Invitation link already used",
+          body: "This invitation token has already been consumed. If you completed password setup, sign in below; otherwise ask an administrator to resend the invitation.",
+        }
+      : inviteStatus === "accepted"
+        ? {
+            title: "Invitation already accepted",
+            body: "Your account setup is already complete. Sign in with your email and password to continue.",
+          }
+        : inviteStatus === "revoked"
+          ? {
+              title: "Invitation revoked",
+              body: "This invitation was revoked by an administrator and can no longer be used.",
+            }
+          : inviteStatus === "invalid"
+            ? {
+                title: "Invalid or incomplete invitation link",
+                body: "The invitation link could not be verified. Open the latest invitation email and press Continue to verify your invitation before setting a password.",
+              }
+            : {
+                title: "Invitation verification required",
+                body: "Invitation issuance is restricted to authorized administrators. Open the secure link in your invitation email and press Continue to set your password.",
+              };
+
   return (
     <main className="auth-page">
       <section aria-labelledby="auth-title" className="auth-card">
@@ -66,7 +98,7 @@ export function AuthPanel({
             <Button className="auth-submit" disabled={pending} type="submit">{pending ? "Please wait..." : content.submit}<ArrowRight aria-hidden="true" size={16} /></Button>
           </form>
         ) : mode === "invite" ? (
-          <div className="module-hold"><ShieldCheck aria-hidden="true" size={18} /><div><strong>Invitation required</strong><p>Invitation issuance is restricted to authorized administrators. If you were invited, use the link in your email; access is granted only after your organization role is assigned.</p></div></div>
+          <div className="module-hold"><ShieldCheck aria-hidden="true" size={18} /><div><strong>{inviteHoldCopy.title}</strong><p>{inviteHoldCopy.body}</p></div></div>
         ) : (
           <div className="module-hold"><ShieldCheck aria-hidden="true" size={18} /><div><strong>Password recovery link required</strong><p>{passwordResetLinkInvalid ? "This recovery link expired or was already used. Request a fresh link and open it before choosing a password." : "Open the secure password recovery link from your email before choosing a password."}</p><Link href="/forgot-password">Request a new recovery link</Link></div></div>
         )}

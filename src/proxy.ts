@@ -4,6 +4,22 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getSupabasePublicEnv } from "@/lib/env";
 
 export async function proxy(request: NextRequest) {
+  const { pathname, searchParams } = request.nextUrl;
+  if (
+    (pathname === "/invite/accept" || pathname === "/reset-password") &&
+    (searchParams.has("token_hash") || searchParams.has("code"))
+  ) {
+    const callbackUrl = new URL("/auth/callback", request.url);
+    callbackUrl.searchParams.set("next", pathname);
+    const tokenHash = searchParams.get("token_hash");
+    const code = searchParams.get("code");
+    const type = searchParams.get("type") ?? (pathname === "/invite/accept" ? "invite" : "recovery");
+    if (tokenHash) callbackUrl.searchParams.set("token_hash", tokenHash);
+    if (code) callbackUrl.searchParams.set("code", code);
+    if (type) callbackUrl.searchParams.set("type", type);
+    return NextResponse.redirect(callbackUrl, { status: 307 });
+  }
+
   let response = NextResponse.next({ request });
   let env: ReturnType<typeof getSupabasePublicEnv>;
   try {

@@ -14,7 +14,10 @@ export function invitationListFailureMessage(code: string | undefined): string {
     case "PGRST301":
     case "401":
       return "The Supabase session was rejected while loading invitations. Sign in again and complete MFA.";
+    case "42702":
+      return "Supabase reported an ambiguous column reference in the invitation-list RPC (reference 42702). Apply the latest invitation RPC column-qualification migration in the Supabase SQL Editor.";
     default:
       return `Supabase could not load invitation records (reference ${safeInvitationListErrorCode(code)}). Retry; if it continues, check the invitation-list RPC and Supabase database logs.`;
   }
 }
+

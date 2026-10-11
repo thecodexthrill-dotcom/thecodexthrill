@@ -90,3 +90,74 @@ test("Invitation email error classification handles unconfigured SMTP safely", (
   assert.equal(safeInvitationEmailCode("invalid!code#injection"), "unknown");
 });
 
+import {
+  evaluateOrganizationDeletionEligibility,
+  isLikelyTestOrganizationName,
+  validateOrganizationDeleteConfirmation,
+} from "./organization-lifecycle-helper.ts";
+
+test("Organization deletion eligibility blocks real client organizations with dependencies and allows empty organizations", () => {
+  const emptyEligibility = evaluateOrganizationDeletionEligibility({
+    projectsCount: 0,
+    tasksCount: 0,
+    documentsCount: 0,
+    invoicesCount: 0,
+    supportTicketsCount: 0,
+    activeMembershipsCount: 0,
+    totalMembershipsCount: 0,
+    roleAssignmentsCount: 0,
+  });
+  assert.equal(emptyEligibility.canPermanentlyDelete, true);
+  assert.equal(emptyEligibility.totalBlockingRecords, 0);
+  assert.equal(emptyEligibility.blockers.length, 0);
+
+  const clientWithRecords = evaluateOrganizationDeletionEligibility({
+    projectsCount: 0,
+    tasksCount: 0,
+    documentsCount: 4,
+    invoicesCount: 1,
+    supportTicketsCount: 0,
+    activeMembershipsCount: 0,
+    totalMembershipsCount: 0,
+    roleAssignmentsCount: 0,
+  });
+  assert.equal(clientWithRecords.canPermanentlyDelete, false);
+  assert.equal(clientWithRecords.totalBlockingRecords, 5);
+  assert.deepEqual(clientWithRecords.blockers, ["4 documents", "1 invoice"]);
+  assert.match(clientWithRecords.recommendation, /Archive or Suspend/i);
+});
+
+test("Organization permanent delete requires exact two-step name and DELETE phrase confirmation", () => {
+  assert.equal(
+    validateOrganizationDeleteConfirmation({
+      targetOrganizationName: "Automation Org 1775810186919",
+      confirmationName: "Automation Org 1775810186919",
+      typedConfirmation: "DELETE Automation Org 1775810186919",
+    }).valid,
+    true,
+  );
+
+  assert.equal(
+    validateOrganizationDeleteConfirmation({
+      targetOrganizationName: "Automation Org 1775810186919",
+      confirmationName: "automation org 1775810186919",
+      typedConfirmation: "DELETE Automation Org 1775810186919",
+    }).valid,
+    false,
+  );
+
+  assert.equal(
+    validateOrganizationDeleteConfirmation({
+      targetOrganizationName: "Automation Org 1775810186919",
+      confirmationName: "Automation Org 1775810186919",
+      typedConfirmation: "delete Automation Org 1775810186919",
+    }).valid,
+    false,
+  );
+
+  assert.equal(isLikelyTestOrganizationName("Automation Org 1775810186919"), true);
+  assert.equal(isLikelyTestOrganizationName("Phase 5 Alpha Org 1775827750592"), true);
+  assert.equal(isLikelyTestOrganizationName("Code Sparks"), false);
+});
+
+

@@ -2,13 +2,24 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireWorkspace } from "@/lib/supabase/access";
+import { resolveAppOrigin } from "@/lib/app-origin";
+import { invitationRedirectTo } from "@/lib/supabase/invitation-link";
 import { extractLeadService } from "@/lib/supabase/lead-service-helper";
 import { dispatchPlatformStaffNotifications } from "@/lib/supabase/notification-service";
 import { logSanitizedOperationalEvent } from "@/lib/supabase/platform-health-helper";
+import { permanentlyDeleteOrganization } from "@/lib/supabase/organization-lifecycle-service";
+
+export type OrganizationActionState = {
+  error?: string;
+  message?: string;
+  deletedOrganizationId?: string;
+  timestamp?: string;
+};
 
 const managerRoles = ["super_admin", "platform_admin"] as const;
 const leadSchema = z.object({
@@ -23,6 +34,27 @@ const leadSchema = z.object({
 
 function canManage(roles: string[]) {
   return roles.some((role) => managerRoles.includes(role as (typeof managerRoles)[number]));
+}
+
+async function verifySameOriginRequest(): Promise<boolean> {
+  const hdrs = await headers();
+  const origin = hdrs.get("origin");
+  if (!origin) return true;
+  const rawForwardedHost = hdrs.get("x-forwarded-host") ?? "";
+  const rawHost = hdrs.get("host") ?? "";
+  const candidateHosts = [
+    ...rawForwardedHost.split(","),
+    ...rawHost.split(","),
+  ]
+    .map((h) => h.trim().toLowerCase())
+    .filter(Boolean);
+  if (candidateHosts.length === 0) return false;
+  try {
+    const originHost = new URL(origin).host.toLowerCase();
+    return candidateHosts.includes(originHost);
+  } catch {
+    return false;
+  }
 }
 
 export async function createLeadAction(formData: FormData) {
@@ -89,18 +121,39 @@ export async function createOrganizationAction(formData: FormData) {
   const parsed = organizationSchema.safeParse({ name: formData.get("name") });
   if (!parsed.success) redirect("/admin/clients?error=invalid");
   const supabase = await createClient();
-  const { error } = await supabase.from("organizations").insert({ name: parsed.data.name, created_by: user.id });
+  const { data: createdOrg, error } = await supabase
+    .from("organizations")
+    .insert({ name: parsed.data.name, created_by: user.id })
+    .select("id, name, status")
+    .maybeSingle();
   if (error) redirect("/admin/clients?error=save");
+  try {
+    const adminClient = createAdminClient();
+    await adminClient.from("audit_events").insert({
+      actor_user_id: user.id,
+      scope: "platform",
+      action: "organization.created",
+      target_type: "organizations",
+      target_id: createdOrg?.id ?? parsed.data.name,
+      details: {
+        organization_name: parsed.data.name,
+        status: createdOrg?.status ?? "active",
+      },
+    });
+  } catch {
+    // Non-blocking audit fallback
+  }
   revalidatePath("/admin/clients");
   redirect("/admin/clients?created=1");
 }
 
 export async function updateOrganizationAction(formData: FormData) {
-  const { roles } = await requireWorkspace("admin", ["clients"]);
+  const { user, roles } = await requireWorkspace("admin", ["clients"]);
   if (!canManage(roles)) redirect("/access-denied");
   const id = z.string().uuid().safeParse(formData.get("id"));
   const name = organizationSchema.shape.name.safeParse(formData.get("name"));
   const status = organizationStatusSchema.safeParse(formData.get("status"));
+  const returnToDetail = formData.get("return_to") === "detail";
   if (!id.success || !name.success || !status.success) redirect("/admin/clients?error=invalid");
   const supabase = await createClient();
   const { error } = await supabase.from("organizations").update({
@@ -108,9 +161,135 @@ export async function updateOrganizationAction(formData: FormData) {
     status: status.data,
     deleted_at: status.data === "deleted" ? new Date().toISOString() : null,
   }).eq("id", id.data);
-  if (error) redirect("/admin/clients?error=save");
+  if (error) redirect(returnToDetail ? `/admin/clients?id=${id.data}&error=save` : "/admin/clients?error=save");
+  try {
+    const adminClient = createAdminClient();
+    await adminClient.from("audit_events").insert({
+      actor_user_id: user.id,
+      scope: "platform",
+      action: "organization.lifecycle_updated",
+      target_type: "organizations",
+      target_id: id.data,
+      details: {
+        organization_name: name.data,
+        status: status.data,
+        archived: status.data === "deleted",
+      },
+    });
+  } catch {
+    // Non-blocking audit fallback
+  }
   revalidatePath("/admin/clients");
-  redirect("/admin/clients?updated=1");
+  revalidatePath("/admin/analytics");
+  redirect(returnToDetail ? `/admin/clients?id=${id.data}&updated=1` : "/admin/clients?updated=1");
+}
+
+export async function permanentlyDeleteOrganizationAction(
+  _previousState: OrganizationActionState,
+  formData: FormData,
+): Promise<OrganizationActionState> {
+  if (!(await verifySameOriginRequest())) {
+    return { error: "Cross-origin request rejected." };
+  }
+
+  const parsed = z
+    .object({
+      organizationId: z.string().uuid(),
+      confirmationName: z.string().trim().min(1).max(160),
+      typedConfirmation: z.string().trim().min(1).max(180),
+    })
+    .safeParse({
+      organizationId: formData.get("organization-id"),
+      confirmationName: formData.get("confirmation-name"),
+      typedConfirmation: formData.get("typed-confirmation"),
+    });
+
+  if (!parsed.success) {
+    return {
+      error: "Provide a valid organization ID, exact organization name, and confirmation phrase.",
+    };
+  }
+
+  const { user, roles } = await requireWorkspace("admin", ["clients"]);
+  if (!roles.includes("super_admin")) {
+    return {
+      error: "Only the Global Super Admin is authorized to permanently delete organizations.",
+    };
+  }
+
+  const supabase = await createClient();
+  const { data: assurance, error: assuranceError } =
+    await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+  if (assuranceError || assurance?.currentLevel !== "aal2") {
+    return {
+      error: "A verified MFA (AAL2) session is required before permanently deleting an organization.",
+    };
+  }
+
+  const result = await permanentlyDeleteOrganization({
+    actorUserId: user.id,
+    actorRoles: roles,
+    actorMfaLevel: assurance.currentLevel,
+    organizationId: parsed.data.organizationId,
+    confirmationName: parsed.data.confirmationName,
+    typedConfirmation: parsed.data.typedConfirmation,
+  });
+
+  if (!result.ok) {
+    return {
+      error:
+        result.error ??
+        "Permanent organization deletion was rejected. Review dependent records and retry.",
+    };
+  }
+
+  revalidatePath("/admin/[[...section]]", "page");
+  revalidatePath("/admin/clients");
+  revalidatePath("/admin/audit-logs");
+  revalidatePath("/admin/analytics");
+  return {
+    message: result.message ?? "Organization permanently deleted.",
+    deletedOrganizationId: result.deletedOrganizationId ?? parsed.data.organizationId,
+    timestamp: new Date().toISOString(),
+  };
+}
+
+async function provisionClientOrganizationMember(params: {
+  adminClient: ReturnType<typeof createAdminClient>;
+  organizationId: string;
+  invitedUserId: string;
+  email: string;
+  role: "client_owner" | "client_manager" | "client_collaborator" | "client_viewer";
+  actorUserId: string;
+}) {
+  await params.adminClient.from("profiles").upsert(
+    {
+      id: params.invitedUserId,
+      email: params.email,
+      display_name: params.email.split("@")[0] ?? "Client Member",
+    },
+    { onConflict: "id" },
+  );
+
+  await params.adminClient.from("organization_memberships").upsert(
+    {
+      organization_id: params.organizationId,
+      user_id: params.invitedUserId,
+      status: "active",
+      role: params.role,
+    },
+    { onConflict: "organization_id,user_id" },
+  );
+
+  await params.adminClient.from("organization_role_assignments").upsert(
+    {
+      organization_id: params.organizationId,
+      user_id: params.invitedUserId,
+      role: params.role,
+      granted_by: params.actorUserId,
+    },
+    { onConflict: "organization_id,user_id,role" },
+  );
 }
 
 const convertLeadSchema = z.object({
@@ -218,12 +397,24 @@ export async function convertLeadToClientAction(formData: FormData) {
   // 6. Supabase Auth client portal invitation
   let onboardingStatus = "smtp_pending";
   try {
-    const { error: inviteErr } = await adminClient.auth.admin.inviteUserByEmail(
+    const appBase = resolveAppOrigin() ?? new URL("https://thecodexthrill.com");
+    const redirectTo = invitationRedirectTo(appBase);
+    const { data: invitedData, error: inviteErr } = await adminClient.auth.admin.inviteUserByEmail(
       lead.email,
-      { redirectTo: "https://thecodexthrill.com/auth/callback?type=invite" },
+      { redirectTo },
     );
     if (!inviteErr) {
       onboardingStatus = "invited";
+      if (invitedData?.user?.id) {
+        await provisionClientOrganizationMember({
+          adminClient,
+          organizationId: newOrg.id,
+          invitedUserId: invitedData.user.id,
+          email: lead.email,
+          role: "client_owner",
+          actorUserId: user.id,
+        });
+      }
     } else {
       logSanitizedOperationalEvent({
         level: "info",
@@ -308,12 +499,24 @@ export async function onboardOrganizationMemberAction(formData: FormData) {
 
   let onboardingStatus = "smtp_pending";
   try {
-    const { error: inviteErr } = await adminClient.auth.admin.inviteUserByEmail(
+    const appBase = resolveAppOrigin() ?? new URL("https://thecodexthrill.com");
+    const redirectTo = invitationRedirectTo(appBase);
+    const { data: invitedData, error: inviteErr } = await adminClient.auth.admin.inviteUserByEmail(
       parsed.data.email,
-      { redirectTo: "https://thecodexthrill.com/auth/callback?type=invite" },
+      { redirectTo },
     );
     if (!inviteErr) {
       onboardingStatus = "invited";
+      if (invitedData?.user?.id) {
+        await provisionClientOrganizationMember({
+          adminClient,
+          organizationId: parsed.data.organization_id,
+          invitedUserId: invitedData.user.id,
+          email: parsed.data.email,
+          role: parsed.data.role,
+          actorUserId: user.id,
+        });
+      }
     }
   } catch (err) {
     logSanitizedOperationalEvent({

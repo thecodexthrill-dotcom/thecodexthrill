@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { hasAuthFlowMethod } from "@/lib/supabase/auth-flow";
 import { cookies } from "next/headers";
 import { hasFreshInvitationSession } from "@/lib/supabase/invitation-handoff";
+import { resolveVerifiedInvitationState } from "@/lib/supabase/invitation-fallback-service";
 
 export const metadata: Metadata = { title: "Accept invitation", robots: { index: false, follow: false } };
 
@@ -20,13 +21,23 @@ export default async function AcceptInvitationPage({ searchParams }: { searchPar
     ? await supabase.rpc("get_auth_invitation_status")
     : { data: null };
   const databaseStatus = typeof invitationStatus === "string" ? invitationStatus : null;
-  const invitationVerified = databaseStatus === "pending" || databaseStatus === "valid";
-  const displayStatus = invite ?? (databaseStatus === "expired" || databaseStatus === "revoked" || databaseStatus === "accepted"
-    ? databaseStatus
+  const resolved = freshInvitationSession && claims?.sub && hasAuthFlowMethod(claims.amr, "invite")
+    ? await resolveVerifiedInvitationState({
+        userId: claims.sub,
+        rpcStatus: databaseStatus,
+      })
+    : {
+        invitationVerified: databaseStatus === "pending" || databaseStatus === "valid",
+        status: databaseStatus,
+      };
+  const invitationVerified = resolved.invitationVerified;
+  const effectiveStatus = resolved.status ?? databaseStatus;
+  const displayStatus = invite ?? (effectiveStatus === "expired" || effectiveStatus === "revoked" || effectiveStatus === "accepted"
+    ? effectiveStatus
     : undefined);
 
   return <>
-    <AuthPanel invitationVerified={invitationVerified} mode="invite" />
+    <AuthPanel invitationVerified={invitationVerified} inviteStatus={displayStatus} mode="invite" />
     <InvitationSessionBridge invitationVerified={invitationVerified} status={displayStatus} />
   </>;
 }

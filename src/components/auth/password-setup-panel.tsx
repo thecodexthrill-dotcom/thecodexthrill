@@ -55,7 +55,7 @@ export function PasswordSetupPanel({ sessionValid, linkStatus, sessionUnavailabl
           state.passwordUpdated ? (
             <div aria-live="polite" className="password-result password-result--success" role="status">
               <strong>Password updated successfully.</strong>
-              <p>Your account is secure. Continuing to the account security checkâ€¦</p>
+              <p>Your account is secure. Continuing to the account security check…</p>
             </div>
           ) : (
             <form action={formAction} className="auth-form" onSubmit={handleSubmit}>
@@ -67,7 +67,7 @@ export function PasswordSetupPanel({ sessionValid, linkStatus, sessionUnavailabl
                 </button>
               </div>
               <ul aria-label="Password requirements" className="password-requirements">
-                <li className={lengthValid ? "is-valid" : ""}>{lengthValid ? "âœ“" : "â€¢"} At least 12 characters</li>
+                <li className={lengthValid ? "is-valid" : ""}>{lengthValid ? "✓" : "•"} At least 12 characters</li>
               </ul>
 
               <label htmlFor="confirm-password">Confirm New Password</label>
@@ -80,7 +80,7 @@ export function PasswordSetupPanel({ sessionValid, linkStatus, sessionUnavailabl
               {confirmation.length > 0 && <p className={`password-match ${confirmationMatches ? "is-valid" : "is-invalid"}`} aria-live="polite">{confirmationMatches ? "Passwords match." : "Passwords do not match."}</p>}
 
               {(clientError || state.error) && <p aria-live="polite" className="auth-feedback password-error" role="alert">{clientError || state.error}</p>}
-              <Button className="auth-submit" disabled={pending} type="submit">{pending ? "Updating passwordâ€¦" : "Update Password"}<ArrowRight aria-hidden="true" size={16} /></Button>
+              <Button className="auth-submit" disabled={pending} type="submit">{pending ? "Updating password…" : "Update Password"}<ArrowRight aria-hidden="true" size={16} /></Button>
             </form>
           )
         ) : (

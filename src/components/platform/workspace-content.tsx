@@ -17,7 +17,6 @@ import {
   createLeadAction,
   updateLeadAction,
   deleteLeadAction,
-  createOrganizationAction,
   updateOrganizationAction,
   convertLeadToClientAction,
   onboardOrganizationMemberAction,
@@ -72,7 +71,10 @@ import {
   type AnalyticsData,
 } from "@/components/platform/analytics-dashboard";
 import { LeadsTable } from "@/components/platform/leads-table";
+import { OrganizationDirectory } from "@/components/platform/organization-directory";
 import { UserManagementDirectory } from "@/components/platform/user-management-directory";
+import { reconstructPlatformInvitationsFromAudit } from "@/lib/supabase/invitation-fallback-service";
+import { loadOrganizationDirectorySummaries } from "@/lib/supabase/organization-lifecycle-service";
 import {
   loadSuperAdminUserDirectory,
   type PlatformInvitationRpcRow,
@@ -311,6 +313,8 @@ export async function WorkspaceContent({
       supabase.rpc("list_platform_invitations"),
       supabase.rpc("list_platform_users"),
     ]);
+    let invitations = (invitationData ?? []) as PlatformInvitationRpcRow[];
+    let recoveredFromAmbiguousColumn = false;
     if (invitationError) {
       logSanitizedOperationalEvent({
         level: "error",
@@ -319,8 +323,11 @@ export async function WorkspaceContent({
         message: "Invitation list RPC failed",
         metadata: { code: safeInvitationListErrorCode(invitationError.code) },
       });
+      if (invitationError.code === "42702") {
+        invitations = await reconstructPlatformInvitationsFromAudit({ roles });
+        recoveredFromAmbiguousColumn = true;
+      }
     }
-    const invitations = (invitationData ?? []) as PlatformInvitationRpcRow[];
     const users = (userData ?? []) as {
       user_id: string;
       email: string;
@@ -429,7 +436,7 @@ export async function WorkspaceContent({
           </section>
         )}
 
-        <section className="module-panel"><h2>Invitations</h2>{invitationError ? <p className="module-alert" role="alert">{invitationListFailureMessage(invitationError.code)}</p> : invitations.length === 0 ? <p className="module-empty">No invitations yet.</p> : <div className="module-table-wrap"><table className="module-table"><thead><tr><th>Email</th><th>Role</th><th>Status</th><th>Created</th><th>Expires</th><th>Resent</th><th>Archived</th><th>Actions</th></tr></thead><tbody>{invitations.map((invitation) => { const canManageInvitation = roles.includes("super_admin") || (roles.includes("platform_admin") && invitation.role !== "platform_admin"); return <tr key={invitation.id}><td>{invitation.email}</td><td>{invitation.role.replaceAll("_", " ")}</td><td>{invitation.status}{invitation.archived_at ? " · Archived" : ""}</td><td>{new Date(invitation.created_at).toLocaleString()}</td><td>{new Date(invitation.expires_at).toLocaleString()}</td><td>{invitation.resend_count ? <>{invitation.resend_count} · {invitation.last_resent_at ? new Date(invitation.last_resent_at).toLocaleString() : "time unavailable"}</> : "Never"}</td><td>{invitation.archived_at ? new Date(invitation.archived_at).toLocaleString() : "—"}</td><td>{canManageInvitation && !invitation.archived_at && (invitation.status === "pending" || invitation.status === "expired" || invitation.status === "accepted" || invitation.status === "revoked") && <InvitationRowActions canArchive={invitation.status !== "pending"} canResend={invitation.status === "pending" || invitation.status === "expired"} canRevoke={invitation.status === "pending"} id={invitation.id} />}</td></tr>; })}</tbody></table></div>}</section>
+        <section className="module-panel"><h2>Invitations</h2>{invitationError && !recoveredFromAmbiguousColumn ? <p className="module-alert" role="alert">{invitationListFailureMessage(invitationError.code)}</p> : invitations.length === 0 ? <p className="module-empty">No invitations yet.</p> : <div className="module-table-wrap"><table className="module-table"><thead><tr><th>Email</th><th>Role</th><th>Status</th><th>Created</th><th>Expires</th><th>Resent</th><th>Archived</th><th>Actions</th></tr></thead><tbody>{invitations.map((invitation) => { const canManageInvitation = roles.includes("super_admin") || (roles.includes("platform_admin") && invitation.role !== "platform_admin"); return <tr key={invitation.id}><td>{invitation.email}</td><td>{invitation.role.replaceAll("_", " ")}</td><td>{invitation.status}{invitation.archived_at ? " · Archived" : ""}</td><td>{new Date(invitation.created_at).toLocaleString()}</td><td>{new Date(invitation.expires_at).toLocaleString()}</td><td>{invitation.resend_count ? <>{invitation.resend_count} · {invitation.last_resent_at ? new Date(invitation.last_resent_at).toLocaleString() : "time unavailable"}</> : "Never"}</td><td>{invitation.archived_at ? new Date(invitation.archived_at).toLocaleString() : "—"}</td><td>{canManageInvitation && !invitation.archived_at && (invitation.status === "pending" || invitation.status === "expired" || invitation.status === "accepted" || invitation.status === "revoked") && <InvitationRowActions canArchive={invitation.status !== "pending"} canResend={invitation.status === "pending" || invitation.status === "expired"} canRevoke={invitation.status === "pending"} id={invitation.id} />}</td></tr>; })}</tbody></table></div>}</section>
       </div>
     );
   }
@@ -767,11 +774,14 @@ export async function WorkspaceContent({
         );
       }
 
-      const { data: orgProjects } = await supabase
-        .from("tenant_projects")
-        .select("id, name, description, status, progress_pct, target_date, created_at")
-        .eq("organization_id", org.id)
-        .order("created_at", { ascending: false });
+      const [{ data: orgProjects }, [orgSummary]] = await Promise.all([
+        supabase
+          .from("tenant_projects")
+          .select("id, name, description, status, progress_pct, target_date, created_at")
+          .eq("organization_id", org.id)
+          .order("created_at", { ascending: false }),
+        loadOrganizationDirectorySummaries([org]),
+      ]);
 
       return (
         <div className="workspace-content">
@@ -782,7 +792,7 @@ export async function WorkspaceContent({
                 <ArrowLeft size={14} /> Back to organization directory
               </Link>
               <span className="record-status" style={{ fontSize: "12px", textTransform: "uppercase" }}>
-                Status: {org.status}
+                Status: {org.status === "deleted" ? "archived" : org.status}
               </span>
             </div>
 
@@ -790,9 +800,29 @@ export async function WorkspaceContent({
               <p className="eyebrow">CLIENT ORGANIZATION · SUPABASE CLOUD</p>
               <h2 style={{ margin: "6px 0 4px" }}>{org.name}</h2>
               <p style={{ color: "var(--muted)", margin: 0 }}>
-                Provisioned on {new Date(org.created_at).toLocaleDateString()}
+                Provisioned on {new Date(org.created_at).toLocaleDateString()} · ID: <code>{org.id}</code>
               </p>
             </div>
+
+            {orgSummary && (
+              <div className="um-summary-grid" style={{ marginTop: "20px" }}>
+                <div className="um-summary-card">
+                  <span>Projects &amp; Tasks</span>
+                  <strong>{orgSummary.dependencies.projectsCount} / {orgSummary.dependencies.tasksCount}</strong>
+                  <small>Delivery projects / work items</small>
+                </div>
+                <div className="um-summary-card">
+                  <span>Files &amp; Invoices</span>
+                  <strong>{orgSummary.dependencies.documentsCount} / {orgSummary.dependencies.invoicesCount}</strong>
+                  <small>Tenant documents / billing statements</small>
+                </div>
+                <div className="um-summary-card">
+                  <span>Portal Members &amp; Tickets</span>
+                  <strong>{orgSummary.dependencies.activeMembershipsCount} / {orgSummary.dependencies.supportTicketsCount}</strong>
+                  <small>Active portal members / support tickets</small>
+                </div>
+              </div>
+            )}
 
             {/* Handover & Delivery Projects Section */}
             <div style={{ marginTop: "32px", padding: "20px", border: "1px solid var(--line)", borderRadius: "14px", background: "var(--surface)" }}>
@@ -896,6 +926,7 @@ export async function WorkspaceContent({
               <h3 style={{ fontSize: "16px", margin: "0 0 14px" }}>Update Organization Lifecycle</h3>
               <form action={updateOrganizationAction} className="auth-form lead-create-form">
                 <input type="hidden" name="id" value={org.id} />
+                <input type="hidden" name="return_to" value="detail" />
                 <label>
                   Organization Name *
                   <input name="name" defaultValue={org.name} required maxLength={160} />
@@ -904,7 +935,7 @@ export async function WorkspaceContent({
                   Lifecycle Status *
                   <select name="status" defaultValue={org.status}>
                     {statuses.map((item) => (
-                      <option key={item} value={item}>{item.toUpperCase()}</option>
+                      <option key={item} value={item}>{item === "deleted" ? "ARCHIVED (DELETED)" : item.toUpperCase()}</option>
                     ))}
                   </select>
                 </label>
@@ -912,6 +943,11 @@ export async function WorkspaceContent({
                   <button className="button button-secondary" type="submit">Save Organization Changes</button>
                 </div>
               </form>
+              {orgSummary && (
+                <p className="module-note" style={{ marginTop: "12px" }}>
+                  {orgSummary.eligibility.recommendation}
+                </p>
+              )}
             </div>
           </section>
         </div>
@@ -920,25 +956,16 @@ export async function WorkspaceContent({
 
     const { data, error } = await supabase.from("organizations").select("id, name, status, created_at, deleted_at").order("created_at", { ascending: false }).limit(100);
     if (error) return <ConnectionError title="Organizations are unavailable" description="The request failed under the current account's database permissions." />;
-    return <div className="workspace-content">{notice && <Notice state={notice} />}
-      <section className="module-panel"><p className="eyebrow">ORGANIZATION DIRECTORY</p><h2>Organizations</h2><p>{data.length} records returned, including suspended and soft-deleted organizations. Click any organization to manage handover projects and client portal access.</p>
-        <form action={createOrganizationAction} className="auth-form lead-create-form"><label>Organization name<input name="name" required maxLength={160} /></label><button className="button-gold" type="submit">Create organization</button></form>
-        {data.length === 0 ? <p className="module-empty">No organizations are registered.</p> : <div className="module-table-wrap"><table className="module-table"><thead><tr><th>Organization</th><th>Lifecycle</th><th>Created</th><th>Manage</th></tr></thead><tbody>{data.map((org) => <tr key={org.id}>
-          <td><Link href={`/admin/clients?id=${org.id}`} style={{ color: "inherit", textDecoration: "none" }}><strong style={{ color: "var(--foreground)" }}>{org.name}</strong></Link></td>
-          <td><span className="record-status">{org.status}</span></td>
-          <td>{new Date(org.created_at).toLocaleDateString()}</td>
-          <td><div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-            <Link className="button button-small button-secondary" href={`/admin/clients?id=${org.id}`}>Open</Link>
-            <details><summary style={{ cursor: "pointer", fontSize: "12px", color: "var(--muted)" }}>Edit</summary><form action={updateOrganizationAction} className="row-edit-form">
-              <input type="hidden" name="id" value={org.id} />
-              <label>Name<input name="name" defaultValue={org.name} required maxLength={160} /></label>
-              <label>Lifecycle<select name="status" defaultValue={org.status}>{statuses.map((item) => <option key={item}>{item}</option>)}</select></label>
-              <button className="button-secondary" type="submit">Save changes</button>
-            </form></details>
-          </div></td>
-        </tr>)}</tbody></table></div>}
-        <p className="module-note">Deleting is a reversible lifecycle status change; organization and audit data remain in place.</p>
-      </section></div>;
+    const organizationSummaries = await loadOrganizationDirectorySummaries(data ?? []);
+    return (
+      <div className="workspace-content">
+        {notice && <Notice state={notice} />}
+        <OrganizationDirectory
+          isSuperAdmin={roles.includes("super_admin")}
+          organizations={organizationSummaries}
+        />
+      </div>
+    );
   }
 
   if (kind === "admin" && key === "audit-logs") {
@@ -1160,12 +1187,19 @@ export async function WorkspaceContent({
         .limit(1000),
     ]);
 
+    let fallbackAnalyticsInvites: NonNullable<AnalyticsData["invitations"]> | null = null;
+    if (invitesResult.error?.code === "42702") {
+      fallbackAnalyticsInvites = await reconstructPlatformInvitationsFromAudit({ roles });
+    }
+
     const queryErrors: string[] = [];
     if (leadsResult.error) queryErrors.push(`Leads: ${leadsResult.error.message}`);
     if (orgsResult.error) queryErrors.push(`Organizations: ${orgsResult.error.message}`);
     if (membershipsResult.error) queryErrors.push(`Client Memberships: ${membershipsResult.error.message}`);
     if (usersResult.error) queryErrors.push(`Staff Directory: ${usersResult.error.message}`);
-    if (invitesResult.error) queryErrors.push(`Invitations: ${invitesResult.error.message}`);
+    if (invitesResult.error && !fallbackAnalyticsInvites) {
+      queryErrors.push(`Invitations: ${invitesResult.error.message}`);
+    }
     if (projectsResult.error) queryErrors.push(`Projects: ${projectsResult.error.message}`);
     if (tasksResult.error) queryErrors.push(`Tasks: ${tasksResult.error.message}`);
     if (invoicesResult.error) queryErrors.push(`Invoices & Billing: ${invoicesResult.error.message}`);
@@ -1184,7 +1218,7 @@ export async function WorkspaceContent({
     }
 
     const invitesList = invitesResult.error
-      ? null
+      ? fallbackAnalyticsInvites
       : ((invitesResult.data ?? []) as NonNullable<AnalyticsData["invitations"]>);
 
     const analyticsData: AnalyticsData = {

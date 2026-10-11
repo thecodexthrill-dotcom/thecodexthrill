@@ -2,17 +2,24 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import { createClient as createStatelessSupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 
+import { getSupabasePublicEnv } from "@/lib/env";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireWorkspace } from "@/lib/supabase/access";
 import { resolveAppOrigin } from "@/lib/app-origin";
 import { hasAuthFlowMethod } from "@/lib/supabase/auth-flow";
-import { invitationRedirectTo } from "@/lib/supabase/invitation-link";
+import { invitationRedirectTo, passwordRecoveryRedirectTo } from "@/lib/supabase/invitation-link";
 import { invitationEmailFailureMessage, safeInvitationEmailCode } from "@/lib/supabase/invitation-email-status";
 import { safeInvitationListErrorCode } from "@/lib/supabase/invitation-list-status";
 import { hasFreshInvitationSession } from "@/lib/supabase/invitation-handoff";
+import {
+  completeInvitationAcceptanceFallback,
+  reconstructPlatformInvitationsFromAudit,
+  resolveVerifiedInvitationState,
+} from "@/lib/supabase/invitation-fallback-service";
 import { cookies, headers } from "next/headers";
 import {
   permanentlyDeleteSupabaseAuthUser,
@@ -61,9 +68,17 @@ export async function requestPasswordResetAction(
   const appBase = resolveAppOrigin();
   if (!appBase) return { error: "Password recovery is unavailable because the HTTPS app origin is not configured." };
 
-  const supabase = await createClient();
-  const { error } = await supabase.auth.resetPasswordForEmail(email.data, {
-    redirectTo: new URL("/auth/callback?next=%2Freset-password", appBase.origin).toString(),
+  const { url, key } = getSupabasePublicEnv();
+  const statelessSupabase = createStatelessSupabaseClient(url, key, {
+    auth: {
+      flowType: "implicit",
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+    },
+  });
+  const { error } = await statelessSupabase.auth.resetPasswordForEmail(email.data, {
+    redirectTo: passwordRecoveryRedirectTo(appBase),
   });
   if (error) return { error: "Could not submit the recovery request. Check the connection and try again." };
   return { message: "Supabase accepted the recovery request. Check your inbox and spam folder for the reset link." };
@@ -134,12 +149,42 @@ export async function acceptInvitationAction(
   const isInviteSession = hasAuthFlowMethod(claims?.amr, "invite") && hasFreshInvitationSession(handoffSubject, claims?.sub, claims?.amr);
   const { data: invitationValid, error: invitationError } = await supabase.rpc("has_valid_auth_invitation");
   const { data: platformInvitation } = await supabase.rpc("has_valid_platform_invitation");
-  if (claimsError || !claims?.sub || !isInviteSession || invitationError || invitationValid !== true) return { error: "Open the latest valid invitation link and use its Continue button before setting the password." };
+  const fallbackState = (!claimsError && claims?.sub && isInviteSession && (invitationError || invitationValid !== true))
+    ? await resolveVerifiedInvitationState({
+        userId: claims.sub,
+        rpcStatus: !invitationError && invitationValid === true ? "valid" : null,
+      })
+    : null;
+  const canProceed = Boolean(
+    !claimsError &&
+      claims?.sub &&
+      isInviteSession &&
+      ((!invitationError && invitationValid === true) || fallbackState?.invitationVerified),
+  );
+  if (!canProceed) return { error: "Open the latest valid invitation link and use its Continue button before setting the password." };
   const { error: passwordError } = await supabase.auth.updateUser({ password: parsed.data.password });
   if (passwordError) return { error: "Password setup failed. Ask an administrator to review the pending invitation." };
+  let acceptedViaRpc = false;
   if (platformInvitation === true) {
     const { error: acceptError } = await supabase.rpc("accept_platform_invitation");
-    if (acceptError) return { error: "The invitation could not be accepted. Ask an administrator to review its status." };
+    if (!acceptError) {
+      acceptedViaRpc = true;
+    }
+  }
+  if (!acceptedViaRpc && claims?.sub) {
+    const stateForAcceptance =
+      fallbackState ??
+      (await resolveVerifiedInvitationState({
+        userId: claims.sub,
+        rpcStatus: null,
+      }));
+    const fallbackResult = await completeInvitationAcceptanceFallback({
+      userId: claims.sub,
+      fallbackState: stateForAcceptance,
+    });
+    if (!fallbackResult.ok) {
+      return { error: fallbackResult.error ?? "The invitation could not be accepted. Ask an administrator to review its status." };
+    }
   }
   cookieStore.delete("ctt_invite_verified");
   redirect("/auth/continue");
@@ -213,8 +258,25 @@ export async function resendPlatformInvitationAction(_previousState: AuthActionS
   if (!roles.some((role) => role === "super_admin" || role === "platform_admin")) redirect("/access-denied");
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("resend_platform_invitation", { p_invitation_id: parsed.data });
-  const invitation = Array.isArray(data) ? data[0] : null;
-  if (error || !invitation?.id || !invitation.email || !invitation.role) {
+  let invitation: { id: string; email: string; role: string } | null = Array.isArray(data) ? data[0] : null;
+  if (error?.code === "42702") {
+    const reconstructed = await reconstructPlatformInvitationsFromAudit({ roles });
+    const target = reconstructed.find((item) => item.id === parsed.data);
+    if (target && (target.status === "pending" || target.status === "expired")) {
+      if (target.status === "pending") {
+        await supabase.rpc("revoke_platform_invitation", { p_invitation_id: target.id });
+      }
+      const { data: replacementId, error: createError } = await supabase.rpc("create_platform_invitation", {
+        p_email: target.email,
+        p_role: target.role,
+        p_expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+      });
+      if (!createError && typeof replacementId === "string") {
+        invitation = { id: replacementId, email: target.email, role: target.role };
+      }
+    }
+  }
+  if ((error && !invitation) || !invitation?.id || !invitation.email || !invitation.role) {
     if (error) console.error("[admin.team.invitations] resend RPC failed", { code: safeInvitationListErrorCode(error.code) });
     return { error: error ? `Supabase rejected the resend request (reference ${safeInvitationListErrorCode(error.code)}). Verify your Super Admin or Platform Admin access and MFA, then retry.` : "The invitation could not be rotated. It may no longer be pending or your role may not authorize it." };
   }
