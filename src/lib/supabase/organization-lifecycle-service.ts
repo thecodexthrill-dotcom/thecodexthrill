@@ -1,6 +1,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import {
+  classifyOrganizationDeleteDatabaseError,
   evaluateOrganizationDeletionEligibility,
   isLikelyTestOrganizationName,
   validateOrganizationDeleteConfirmation,
@@ -11,6 +12,7 @@ import {
 } from "./organization-lifecycle-helper";
 
 export {
+  classifyOrganizationDeleteDatabaseError,
   evaluateOrganizationDeletionEligibility,
   isLikelyTestOrganizationName,
   validateOrganizationDeleteConfirmation,
@@ -30,6 +32,7 @@ function emptyDependencies(): OrganizationDependencyCounts {
     activeMembershipsCount: 0,
     totalMembershipsCount: 0,
     roleAssignmentsCount: 0,
+    auditEventsCount: 0,
   };
 }
 
@@ -42,12 +45,18 @@ export async function loadOrganizationDirectorySummaries(
     deleted_at: string | null;
   }[],
 ): Promise<OrganizationDirectoryItem[]> {
+  if (rawOrganizations.length === 0) {
+    return [];
+  }
+
   let dbClient;
   try {
     dbClient = createAdminClient();
   } catch {
     dbClient = await createClient();
   }
+
+  const orgIds = rawOrganizations.map((org) => org.id);
 
   const [
     projectsRes,
@@ -57,14 +66,16 @@ export async function loadOrganizationDirectorySummaries(
     ticketsRes,
     membershipsRes,
     rolesRes,
+    auditEventsRes,
   ] = await Promise.all([
-    dbClient.from("tenant_projects").select("id, organization_id"),
-    dbClient.from("tenant_tasks").select("id, organization_id"),
-    dbClient.from("tenant_documents").select("id, organization_id"),
-    dbClient.from("tenant_invoices").select("id, organization_id"),
-    dbClient.from("support_tickets").select("id, organization_id"),
-    dbClient.from("organization_memberships").select("organization_id, status"),
-    dbClient.from("organization_role_assignments").select("organization_id"),
+    dbClient.from("tenant_projects").select("id, organization_id").in("organization_id", orgIds),
+    dbClient.from("tenant_tasks").select("id, organization_id").in("organization_id", orgIds),
+    dbClient.from("tenant_documents").select("id, organization_id").in("organization_id", orgIds),
+    dbClient.from("tenant_invoices").select("id, organization_id").in("organization_id", orgIds),
+    dbClient.from("support_tickets").select("id, organization_id").in("organization_id", orgIds),
+    dbClient.from("organization_memberships").select("organization_id, status").in("organization_id", orgIds),
+    dbClient.from("organization_role_assignments").select("organization_id").in("organization_id", orgIds),
+    dbClient.from("audit_events").select("id, organization_id").in("organization_id", orgIds).limit(5000),
   ]);
 
   const mapByOrg = new Map<string, OrganizationDependencyCounts>();
@@ -105,6 +116,11 @@ export async function loadOrganizationDirectorySummaries(
   for (const row of rolesRes.data ?? []) {
     const entry = mapByOrg.get(row.organization_id);
     if (entry) entry.roleAssignmentsCount += 1;
+  }
+  for (const row of auditEventsRes.data ?? []) {
+    if (!row.organization_id) continue;
+    const entry = mapByOrg.get(row.organization_id);
+    if (entry) entry.auditEventsCount = (entry.auditEventsCount ?? 0) + 1;
   }
 
   const nameCounts = new Map<string, number>();
@@ -207,7 +223,7 @@ export async function permanentlyDeleteOrganization(params: {
   if (deleteError) {
     return {
       ok: false,
-      error: `Supabase rejected organization deletion (${deleteError.code ?? "error"}). Use Archive or Suspend instead.`,
+      error: classifyOrganizationDeleteDatabaseError(deleteError, org.name),
     };
   }
 

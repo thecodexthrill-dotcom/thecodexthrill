@@ -214,12 +214,12 @@ export function OrganizationDirectory({
         <div className="um-summary-card">
           <span>Protected Client Records</span>
           <strong>{counts.withRecords}</strong>
-          <small>Protected from deletion by projects, invoices, files, or members</small>
+          <small>Protected from deletion by projects, invoices, files, members, or retained audit history</small>
         </div>
         <div className="um-summary-card">
           <span>Empty / Deletable</span>
           <strong>{counts.emptyDeletable}</strong>
-          <small>Zero projects, invoices, files, tickets, or memberships</small>
+          <small>Zero projects, invoices, files, tickets, memberships, or organization audit events</small>
         </div>
       </div>
 
@@ -349,6 +349,14 @@ export function OrganizationDirectory({
                               {deps.activeMembershipsCount}/{deps.totalMembershipsCount} Member{deps.totalMembershipsCount === 1 ? "" : "s"}
                             </span>
                           )}
+                          {(deps.auditEventsCount ?? 0) > 0 && (
+                            <span
+                              className="um-badge um-badge-muted"
+                              title="Retained organization-scoped audit history in public.audit_events (audit_events_organization_id_fkey ON DELETE RESTRICT)"
+                            >
+                              {deps.auditEventsCount} Audit Event{deps.auditEventsCount === 1 ? "" : "s"}
+                            </span>
+                          )}
                         </div>
                       )}
                     </td>
@@ -459,8 +467,9 @@ export function OrganizationDirectory({
       )}
 
       <p className="module-note" style={{ marginTop: "14px" }}>
-        Real client organizations with projects, tasks, documents, invoices, support tickets, or
-        memberships are protected from permanent deletion; use <strong>Archive</strong> or{" "}
+        Organizations with projects, tasks, documents, invoices, support tickets, memberships, or
+        retained organization audit history (<code>public.audit_events.organization_id</code>) are
+        protected from permanent deletion; use <strong>Archive</strong> or{" "}
         <strong>Suspend</strong> to deactivate access while preserving historical records.
       </p>
 
@@ -579,8 +588,8 @@ export function OrganizationDirectory({
                       <AlertTriangle aria-hidden="true" size={16} /> Irreversible Super Admin Action
                     </div>
                     <p style={{ margin: "6px 0 0", color: "var(--muted)" }}>
-                      This organization has <strong>0 projects, 0 tasks, 0 documents, 0 invoices, 0 tickets, and 0 memberships</strong>.
-                      Deleting it permanently removes the row from <code>public.organizations</code> and writes an immutable record to <code>audit_events</code>.
+                      This organization has <strong>0 projects, 0 tasks, 0 documents, 0 invoices, 0 tickets, 0 memberships, and 0 organization audit events</strong>.
+                      Deleting it permanently removes the row from <code>public.organizations</code> and writes an immutable platform record to <code>audit_events</code>.
                     </p>
                   </div>
 

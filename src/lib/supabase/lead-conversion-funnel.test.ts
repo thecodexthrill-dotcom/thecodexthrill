@@ -91,6 +91,7 @@ test("Invitation email error classification handles unconfigured SMTP safely", (
 });
 
 import {
+  classifyOrganizationDeleteDatabaseError,
   evaluateOrganizationDeletionEligibility,
   isLikelyTestOrganizationName,
   validateOrganizationDeleteConfirmation,
@@ -106,6 +107,7 @@ test("Organization deletion eligibility blocks real client organizations with de
     activeMembershipsCount: 0,
     totalMembershipsCount: 0,
     roleAssignmentsCount: 0,
+    auditEventsCount: 0,
   });
   assert.equal(emptyEligibility.canPermanentlyDelete, true);
   assert.equal(emptyEligibility.totalBlockingRecords, 0);
@@ -120,11 +122,50 @@ test("Organization deletion eligibility blocks real client organizations with de
     activeMembershipsCount: 0,
     totalMembershipsCount: 0,
     roleAssignmentsCount: 0,
+    auditEventsCount: 6,
   });
   assert.equal(clientWithRecords.canPermanentlyDelete, false);
-  assert.equal(clientWithRecords.totalBlockingRecords, 5);
-  assert.deepEqual(clientWithRecords.blockers, ["4 documents", "1 invoice"]);
+  assert.equal(clientWithRecords.totalBlockingRecords, 11);
+  assert.deepEqual(clientWithRecords.blockers, [
+    "4 documents",
+    "1 invoice",
+    "6 retained audit events",
+  ]);
   assert.match(clientWithRecords.recommendation, /Archive or Suspend/i);
+});
+
+test("Regression 23503: organization with 0 active operational rows but retained organization audit_events is blocked from permanent deletion", () => {
+  // Reproduces Automation Org MV3B9DKK (14fff560-9d27-427c-b0b2-22b35212c883):
+  // 0 projects, tasks, documents, invoices, tickets, and memberships, but 8 rows in public.audit_events
+  // referencing public.organizations(id) via audit_events_organization_id_fkey (ON DELETE RESTRICT).
+  const retainedAuditOnly = evaluateOrganizationDeletionEligibility({
+    projectsCount: 0,
+    tasksCount: 0,
+    documentsCount: 0,
+    invoicesCount: 0,
+    supportTicketsCount: 0,
+    activeMembershipsCount: 0,
+    totalMembershipsCount: 0,
+    roleAssignmentsCount: 0,
+    auditEventsCount: 8,
+  });
+  assert.equal(retainedAuditOnly.canPermanentlyDelete, false);
+  assert.equal(retainedAuditOnly.totalBlockingRecords, 8);
+  assert.deepEqual(retainedAuditOnly.blockers, ["8 retained audit events"]);
+  assert.match(retainedAuditOnly.recommendation, /ON DELETE RESTRICT/i);
+  assert.match(retainedAuditOnly.recommendation, /Archive or Suspend/i);
+
+  const fkErrorMessage = classifyOrganizationDeleteDatabaseError(
+    {
+      code: "23503",
+      message:
+        'update or delete on table "organizations" violates foreign key constraint "audit_events_organization_id_fkey" on table "audit_events"',
+      details: 'Key (id)=(14fff560-9d27-427c-b0b2-22b35212c883) is still referenced from table "audit_events".',
+    },
+    "Automation Org MV3B9DKK",
+  );
+  assert.match(fkErrorMessage, /audit_events_organization_id_fkey \(23503\)/);
+  assert.match(fkErrorMessage, /Archive or Suspend/i);
 });
 
 test("Organization permanent delete requires exact two-step name and DELETE phrase confirmation", () => {

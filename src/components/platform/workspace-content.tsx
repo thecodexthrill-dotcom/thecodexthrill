@@ -819,7 +819,7 @@ export async function WorkspaceContent({
                 <div className="um-summary-card">
                   <span>Portal Members &amp; Tickets</span>
                   <strong>{orgSummary.dependencies.activeMembershipsCount} / {orgSummary.dependencies.supportTicketsCount}</strong>
-                  <small>Active portal members / support tickets</small>
+                  <small>Active portal members / support tickets · {orgSummary.dependencies.auditEventsCount ?? 0} retained audit events</small>
                 </div>
               </div>
             )}
