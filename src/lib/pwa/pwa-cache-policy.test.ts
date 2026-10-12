@@ -363,5 +363,21 @@ test("public/sw.js and public/offline.html stay synchronized with pwa-cache-poli
     offlineHtml.includes("Retry connection"),
     "Expected public/offline.html to provide an interactive retry action",
   );
+
+  for (const relPath of [
+    ["src", "app", "error.tsx"],
+    ["src", "app", "admin", "[[...section]]", "error.tsx"],
+    ["src", "app", "portal", "[[...section]]", "error.tsx"],
+  ]) {
+    const source = fs.readFileSync(path.join(repoRoot, ...relPath), "utf8");
+    assert.ok(
+      source.includes("isStaleAssetOrChunkLoadError"),
+      `Expected ${relPath.join("/")} to detect stale asset/chunk errors`,
+    );
+    assert.ok(
+      source.includes("Reload latest version"),
+      `Expected ${relPath.join("/")} to offer a Reload latest version action`,
+    );
+  }
 });
 
