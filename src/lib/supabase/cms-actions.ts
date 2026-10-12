@@ -601,6 +601,7 @@ export async function updateCmsSiteSettingsAction(
     actor_id: user.id,
   });
 
+  updateTag("cms-public");
   revalidatePath("/admin/cms");
   revalidatePath("/");
   return { message: `Settings for "${key.data}" updated successfully.` };
@@ -1348,3 +1349,334 @@ export async function deleteCmsFaqAction(
   revalidatePath("/");
   return { message: "FAQ deleted successfully." };
 }
+
+// ============================================================================
+// 12. Media Library CMS Actions (cms_media)
+// ============================================================================
+
+const mediaSchema = z.object({
+  id: z.string().uuid().optional(),
+  fileName: z.string().trim().min(1).max(255),
+  publicUrl: z.string().trim().min(1).max(2000),
+  mimeType: z.string().trim().default("image/jpeg"),
+  fileSizeBytes: z.coerce.number().int().min(1).default(1024),
+  category: z.string().trim().default("general"),
+  altText: z.string().trim().max(500).default(""),
+  isArchived: z.boolean().default(false),
+});
+
+export async function saveCmsMediaAction(
+  _previousState: CmsActionState,
+  formData: FormData,
+): Promise<CmsActionState> {
+  const { supabase, user } = await verifyCmsAdminSession();
+
+  const raw = {
+    id: formData.get("id") ? String(formData.get("id")) : undefined,
+    fileName: formData.get("file_name"),
+    publicUrl: formData.get("public_url"),
+    mimeType: formData.get("mime_type") || "image/jpeg",
+    fileSizeBytes: formData.get("file_size_bytes") || 1024,
+    category: formData.get("category") || "general",
+    altText: formData.get("alt_text") || "",
+    isArchived: formData.get("is_archived") === "true",
+  };
+
+  const parsed = mediaSchema.safeParse(raw);
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid media asset inputs." };
+  }
+
+  const { id, fileName, publicUrl, mimeType, fileSizeBytes, category, altText, isArchived } =
+    parsed.data;
+
+  if (id) {
+    const { error } = await supabase
+      .from("cms_media")
+      .update({
+        file_name: fileName,
+        public_url: publicUrl,
+        mime_type: mimeType,
+        file_size_bytes: fileSizeBytes,
+        category,
+        alt_text: altText,
+        is_archived: isArchived,
+      })
+      .eq("id", id);
+
+    if (error) return { error: `Failed to update media asset: ${error.message}` };
+  } else {
+    const storagePath = `cms-media/${Date.now()}-${fileName.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+    const { error } = await supabase.from("cms_media").insert({
+      file_name: fileName,
+      storage_path: storagePath,
+      public_url: publicUrl,
+      mime_type: mimeType,
+      file_size_bytes: fileSizeBytes,
+      category,
+      alt_text: altText,
+      uploaded_by: user.id,
+      is_archived: isArchived,
+    });
+
+    if (error) return { error: `Failed to register media asset: ${error.message}` };
+  }
+
+  updateTag("cms-public");
+  revalidatePath("/admin/cms");
+  return { message: "Media asset saved successfully." };
+}
+
+export async function deleteCmsMediaAction(
+  _previousState: CmsActionState,
+  formData: FormData,
+): Promise<CmsActionState> {
+  const { supabase } = await verifyCmsAdminSession();
+  const id = z.string().uuid().safeParse(formData.get("id"));
+  if (!id.success) return { error: "Invalid media asset ID." };
+
+  const { error } = await supabase.from("cms_media").delete().eq("id", id.data);
+  if (error) return { error: `Could not delete media asset: ${error.message}` };
+
+  updateTag("cms-public");
+  revalidatePath("/admin/cms");
+  return { message: "Media asset deleted." };
+}
+
+// ============================================================================
+// 13. Navigation Menus CMS Actions (cms_menus & cms_menu_items)
+// ============================================================================
+
+const menuCodeTitles: Record<string, string> = {
+  header: "Primary Header Navigation",
+  footer_services: "Footer Services Column",
+  footer_company: "Footer Company Column",
+  footer_platform: "Footer Platform Column",
+  footer_legal: "Footer Trust & Legal Column",
+};
+
+const menuItemSchema = z.object({
+  id: z.string().uuid().optional(),
+  menuCode: z.enum([
+    "header",
+    "footer_services",
+    "footer_company",
+    "footer_platform",
+    "footer_legal",
+  ]),
+  label: z.string().trim().min(1).max(120),
+  href: z.string().trim().min(1).max(500),
+  isExternal: z.boolean().default(false),
+  isVisible: z.boolean().default(true),
+  sortOrder: z.coerce.number().default(0),
+});
+
+export async function saveCmsMenuItemAction(
+  _previousState: CmsActionState,
+  formData: FormData,
+): Promise<CmsActionState> {
+  const { supabase, user } = await verifyCmsAdminSession();
+
+  const raw = {
+    id: formData.get("id") ? String(formData.get("id")) : undefined,
+    menuCode: formData.get("menu_code") || "header",
+    label: formData.get("label"),
+    href: formData.get("href"),
+    isExternal: formData.get("is_external") === "true",
+    isVisible: formData.get("is_visible") !== "false",
+    sortOrder: formData.get("sort_order") || 0,
+  };
+
+  const parsed = menuItemSchema.safeParse(raw);
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid navigation menu item inputs." };
+  }
+
+  const { id, menuCode, label, href, isExternal, isVisible, sortOrder } = parsed.data;
+
+  // Ensure parent menu exists for menuCode
+  const { data: menuRecord, error: menuError } = await supabase
+    .from("cms_menus")
+    .upsert(
+      {
+        code: menuCode,
+        title: menuCodeTitles[menuCode] || menuCode,
+      },
+      { onConflict: "code" },
+    )
+    .select("id")
+    .single();
+
+  if (menuError || !menuRecord) {
+    return { error: `Failed to resolve menu container: ${menuError?.message ?? "Unknown error"}` };
+  }
+
+  const payload = {
+    menu_id: menuRecord.id,
+    label,
+    href,
+    is_external: isExternal,
+    is_visible: isVisible,
+    sort_order: sortOrder,
+  };
+
+  if (id) {
+    const { error } = await supabase.from("cms_menu_items").update(payload).eq("id", id);
+    if (error) return { error: `Failed to update navigation link: ${error.message}` };
+  } else {
+    const { error } = await supabase.from("cms_menu_items").insert(payload);
+    if (error) return { error: `Failed to create navigation link: ${error.message}` };
+  }
+
+  await supabase.from("cms_revisions").insert({
+    entity_type: "menu",
+    entity_id: menuRecord.id,
+    action: id ? "update" : "create",
+    snapshot: { menuCode, ...payload, id: id ?? null },
+    actor_id: user.id,
+  });
+
+  updateTag("cms-public");
+  revalidatePath("/admin/cms");
+  revalidatePath("/");
+  return { message: "Navigation link saved successfully." };
+}
+
+export async function deleteCmsMenuItemAction(
+  _previousState: CmsActionState,
+  formData: FormData,
+): Promise<CmsActionState> {
+  const { supabase } = await verifyCmsAdminSession();
+  const id = z.string().uuid().safeParse(formData.get("id"));
+  if (!id.success) return { error: "Invalid menu item ID." };
+
+  const { error } = await supabase.from("cms_menu_items").delete().eq("id", id.data);
+  if (error) return { error: `Could not delete navigation link: ${error.message}` };
+
+  updateTag("cms-public");
+  revalidatePath("/admin/cms");
+  revalidatePath("/");
+  return { message: "Navigation link removed." };
+}
+
+// ============================================================================
+// 14. CMS Revision Snapshot Restore Action (cms_revisions)
+// ============================================================================
+
+export async function restoreCmsRevisionAction(
+  _previousState: CmsActionState,
+  formData: FormData,
+): Promise<CmsActionState> {
+  const { supabase, user } = await verifyCmsAdminSession();
+  const revisionId = z.string().uuid().safeParse(formData.get("revision_id"));
+  if (!revisionId.success) return { error: "Invalid revision ID." };
+
+  const { data: revision, error: fetchError } = await supabase
+    .from("cms_revisions")
+    .select("id, entity_type, entity_id, snapshot")
+    .eq("id", revisionId.data)
+    .single();
+
+  if (fetchError || !revision) {
+    return { error: "Revision snapshot could not be loaded." };
+  }
+
+  const snap = (revision.snapshot ?? {}) as Record<string, unknown>;
+  const entityType = revision.entity_type as string;
+  const entityId = revision.entity_id as string;
+
+  if (entityType === "page" && typeof snap.slug === "string" && typeof snap.title === "string") {
+    const { error } = await supabase.from("cms_pages").upsert({
+      id: entityId,
+      slug: snap.slug,
+      title: snap.title,
+      content: typeof snap.content === "string" ? snap.content : "",
+      status: typeof snap.status === "string" ? snap.status : "draft",
+      seo_title: typeof snap.seo_title === "string" ? snap.seo_title : null,
+      seo_description: typeof snap.seo_description === "string" ? snap.seo_description : null,
+      sort_order: typeof snap.sort_order === "number" ? snap.sort_order : 0,
+      updated_by: user.id,
+    });
+    if (error) return { error: `Failed to restore page snapshot: ${error.message}` };
+  } else if (entityType === "post" && typeof snap.slug === "string" && typeof snap.title === "string") {
+    const { error } = await supabase.from("cms_posts").upsert({
+      id: entityId,
+      slug: snap.slug,
+      title: snap.title,
+      excerpt: typeof snap.excerpt === "string" ? snap.excerpt : "",
+      content: typeof snap.content === "string" ? snap.content : "",
+      author_name: typeof snap.author_name === "string" ? snap.author_name : "TheCodexThrill Team",
+      status: typeof snap.status === "string" ? snap.status : "draft",
+      reading_time: typeof snap.reading_time === "string" ? snap.reading_time : "5 min read",
+      seo_title: typeof snap.seo_title === "string" ? snap.seo_title : null,
+      seo_description: typeof snap.seo_description === "string" ? snap.seo_description : null,
+      updated_by: user.id,
+    });
+    if (error) return { error: `Failed to restore article snapshot: ${error.message}` };
+  } else if (entityType === "service" && typeof snap.slug === "string" && typeof snap.title === "string") {
+    const { error } = await supabase.from("cms_services").upsert({
+      id: entityId,
+      slug: snap.slug,
+      title: snap.title,
+      short_description: typeof snap.short_description === "string" ? snap.short_description : "",
+      full_description: typeof snap.full_description === "string" ? snap.full_description : "",
+      icon_name: typeof snap.icon_name === "string" ? snap.icon_name : "Code2",
+      features: Array.isArray(snap.features) ? snap.features : [],
+      cta_label: typeof snap.cta_label === "string" ? snap.cta_label : "Start a Project",
+      cta_url: typeof snap.cta_url === "string" ? snap.cta_url : "/contact",
+      status: typeof snap.status === "string" ? snap.status : "published",
+      sort_order: typeof snap.sort_order === "number" ? snap.sort_order : 0,
+      updated_by: user.id,
+    });
+    if (error) return { error: `Failed to restore service snapshot: ${error.message}` };
+  } else if (entityType === "case_study" && typeof snap.slug === "string" && typeof snap.title === "string") {
+    const { error } = await supabase.from("cms_case_studies").upsert({
+      id: entityId,
+      slug: snap.slug,
+      title: snap.title,
+      client_name: typeof snap.client_name === "string" ? snap.client_name : "",
+      industry: typeof snap.industry === "string" ? snap.industry : "",
+      challenge: typeof snap.challenge === "string" ? snap.challenge : "",
+      solution: typeof snap.solution === "string" ? snap.solution : "",
+      results: typeof snap.results === "string" ? snap.results : "",
+      metrics: Array.isArray(snap.metrics) ? snap.metrics : [],
+      tech_stack: Array.isArray(snap.tech_stack) ? snap.tech_stack : [],
+      status: typeof snap.status === "string" ? snap.status : "published",
+      sort_order: typeof snap.sort_order === "number" ? snap.sort_order : 0,
+      updated_by: user.id,
+    });
+    if (error) return { error: `Failed to restore case study snapshot: ${error.message}` };
+  } else if (entityType === "setting" && typeof snap.key === "string" && snap.value && typeof snap.value === "object") {
+    const { error } = await supabase.from("cms_site_settings").upsert(
+      {
+        key: snap.key,
+        value: snap.value,
+        updated_by: user.id,
+      },
+      { onConflict: "key" },
+    );
+    if (error) return { error: `Failed to restore site setting snapshot: ${error.message}` };
+  } else {
+    return {
+      error: `Direct restore is not supported for ${entityType} snapshots without required fields.`,
+    };
+  }
+
+  await supabase.from("cms_revisions").insert({
+    entity_type: entityType,
+    entity_id: entityId,
+    action: "restore",
+    snapshot: snap,
+    actor_id: user.id,
+  });
+
+  updateTag("cms-public");
+  updateTag("cms-pages");
+  updateTag("cms-posts");
+  updateTag("cms-services");
+  updateTag("cms-case-studies");
+  revalidatePath("/admin/cms");
+  revalidatePath("/");
+  return { message: `Restored ${entityType} snapshot from revision ${revisionId.data.slice(0, 8)}.` };
+}
+

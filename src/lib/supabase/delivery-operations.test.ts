@@ -2,11 +2,14 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   calculateProjectTaskProgress,
+  canPortalUserAccessOrganization,
+  canPortalUserAccessSupportTicket,
   classifyInvoiceLifecycleStatus,
   formatDeliveryDescription,
   parseDeliveryDescription,
   parseInvoiceItems,
   redactInternalNotesForClient,
+  resolvePortalTicketOrganizationId,
 } from "./delivery-operations-helper.ts";
 
 describe("Phase 3: Client Delivery & Revenue Operations Helpers", () => {
@@ -168,5 +171,64 @@ describe("Phase 3: Client Delivery & Revenue Operations Helpers", () => {
     assert.equal(settled.balanceDueCents, 0);
     assert.equal(settled.hasVerifiedPaymentRecord, true);
   });
+
+  it("enforces strict portal organization and support ticket access isolation", () => {
+    const activeOrgs = new Set(["org-alpha", "org-beta"]);
+
+    assert.equal(canPortalUserAccessOrganization("org-alpha", activeOrgs), true);
+    assert.equal(canPortalUserAccessOrganization("org-gamma", activeOrgs), false);
+    assert.equal(canPortalUserAccessOrganization(null, activeOrgs), false);
+
+    // Ticket belonging to an active organization of the user is accessible
+    assert.equal(
+      canPortalUserAccessSupportTicket(
+        { organization_id: "org-alpha", customer_id: "other-user" },
+        "user-1",
+        activeOrgs,
+      ),
+      true,
+    );
+
+    // Ticket with null organization_id is ONLY accessible if customer_id matches userId
+    assert.equal(
+      canPortalUserAccessSupportTicket(
+        { organization_id: null, customer_id: "user-1" },
+        "user-1",
+        activeOrgs,
+      ),
+      true,
+    );
+    assert.equal(
+      canPortalUserAccessSupportTicket(
+        { organization_id: null, customer_id: "other-user" },
+        "user-1",
+        activeOrgs,
+      ),
+      false,
+    );
+
+    // Ticket belonging to a different organization is blocked
+    assert.equal(
+      canPortalUserAccessSupportTicket(
+        { organization_id: "org-foreign", customer_id: "other-user" },
+        "user-1",
+        activeOrgs,
+      ),
+      false,
+    );
+
+    // Portal ticket organization resolution prevents cross-tenant spoofing
+    assert.equal(
+      resolvePortalTicketOrganizationId("org-beta", activeOrgs),
+      "org-beta",
+    );
+    assert.equal(
+      resolvePortalTicketOrganizationId("org-foreign", activeOrgs),
+      "org-alpha",
+    );
+    assert.equal(resolvePortalTicketOrganizationId(null, activeOrgs), "org-alpha");
+    assert.equal(resolvePortalTicketOrganizationId("org-alpha", []), null);
+  });
 });
+
 

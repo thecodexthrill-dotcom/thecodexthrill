@@ -23,6 +23,7 @@ import {
 } from "@/lib/supabase/lead-actions";
 import { extractLeadService, getLeadFollowUpStatus } from "@/lib/supabase/lead-service-helper";
 import {
+  canPortalUserAccessSupportTicket,
   classifyInvoiceLifecycleStatus,
   parseDeliveryDescription,
   redactInternalNotesForClient,
@@ -42,6 +43,10 @@ import {
   type CmsIndustryRecord,
   type CmsTechStackRecord,
   type CmsFaqRecord,
+  type CmsMediaRecord,
+  type CmsMenuRecord,
+  type CmsMenuItemRecord,
+  type CmsRevisionRecord,
 } from "@/components/platform/cms-manager";
 import {
   SupportManager,
@@ -129,7 +134,8 @@ export async function WorkspaceContent({
 
   if (kind === "portal" && key === "overview") {
     const supabase = await createClient();
-    const [membershipsRes, projectsRes, tasksRes, docsRes, invoicesRes, ticketsRes] = await Promise.all([
+    const [authRes, membershipsRes, projectsRes, tasksRes, docsRes, invoicesRes, ticketsRes] = await Promise.all([
+      supabase.auth.getUser(),
       supabase
         .from("organization_memberships")
         .select("organization_id, role, status, organizations(id, name, status)")
@@ -150,9 +156,10 @@ export async function WorkspaceContent({
         .select("id, organization_id, invoice_number, amount_cents, status, due_date, items"),
       supabase
         .from("support_tickets")
-        .select("id, organization_id, status"),
+        .select("id, organization_id, customer_id, status"),
     ]);
 
+    const currentUserId = authRes.data.user?.id ?? null;
     const memberships = membershipsRes.data ?? [];
     const allowedOrgIds = new Set(memberships.map((m) => m.organization_id));
 
@@ -165,8 +172,8 @@ export async function WorkspaceContent({
     const portalTasks = (tasksRes.data ?? []).filter((t) => allowedOrgIds.has(t.organization_id));
     const portalDocs = (docsRes.data ?? []).filter((d) => allowedOrgIds.has(d.organization_id));
     const portalInvoices = (invoicesRes.data ?? []).filter((inv) => allowedOrgIds.has(inv.organization_id));
-    const portalTickets = (ticketsRes.data ?? []).filter(
-      (t) => !t.organization_id || allowedOrgIds.has(t.organization_id)
+    const portalTickets = (ticketsRes.data ?? []).filter((t) =>
+      canPortalUserAccessSupportTicket(t, currentUserId, allowedOrgIds),
     );
 
     const avgProgress =
@@ -1403,6 +1410,10 @@ export async function WorkspaceContent({
       industriesResult,
       techStackResult,
       faqsResult,
+      mediaResult,
+      menusResult,
+      menuItemsResult,
+      revisionsResult,
     ] = await Promise.all([
       supabase.from("cms_pages").select("*").order("sort_order", { ascending: true }),
       supabase.from("cms_services").select("*").order("sort_order", { ascending: true }),
@@ -1415,6 +1426,10 @@ export async function WorkspaceContent({
       supabase.from("cms_industries").select("*").order("sort_order", { ascending: true }),
       supabase.from("cms_tech_stack").select("*").order("sort_order", { ascending: true }),
       supabase.from("cms_faqs").select("*").order("sort_order", { ascending: true }),
+      supabase.from("cms_media").select("*").order("created_at", { ascending: false }),
+      supabase.from("cms_menus").select("*"),
+      supabase.from("cms_menu_items").select("*").order("sort_order", { ascending: true }),
+      supabase.from("cms_revisions").select("*").order("created_at", { ascending: false }).limit(50),
     ]);
 
     const pages = (pagesResult.data ?? []) as CmsPageRecord[];
@@ -1428,6 +1443,10 @@ export async function WorkspaceContent({
     const industries = (industriesResult.data ?? []) as CmsIndustryRecord[];
     const techStack = (techStackResult.data ?? []) as CmsTechStackRecord[];
     const faqs = (faqsResult.data ?? []) as CmsFaqRecord[];
+    const media = (mediaResult.data ?? []) as CmsMediaRecord[];
+    const menus = (menusResult.data ?? []) as CmsMenuRecord[];
+    const menuItems = (menuItemsResult.data ?? []) as CmsMenuItemRecord[];
+    const revisions = (revisionsResult.data ?? []) as CmsRevisionRecord[];
 
     const heroSettingObj = settings.find((s) => s.key === "hero_content")?.value as Record<string, string> | undefined;
 
@@ -1445,6 +1464,10 @@ export async function WorkspaceContent({
         industries={industries}
         techStack={techStack}
         faqs={faqs}
+        media={media}
+        menus={menus}
+        menuItems={menuItems}
+        revisions={revisions}
       />
     );
   }
@@ -1465,7 +1488,8 @@ export async function WorkspaceContent({
 
   if (key === "support") {
     const supabase = await createClient();
-    const [ticketsResult, orgsResult] = await Promise.all([
+    const [authRes, ticketsResult, orgsResult, staffResult] = await Promise.all([
+      supabase.auth.getUser(),
       supabase
         .from("support_tickets")
         .select("*, messages:support_ticket_messages(*)")
@@ -1474,8 +1498,12 @@ export async function WorkspaceContent({
       kind === "admin"
         ? supabase.from("organizations").select("id, name").eq("status", "active")
         : supabase.from("organization_memberships").select("organization_id, organizations(id, name)").eq("status", "active"),
+      kind === "admin"
+        ? supabase.rpc("list_platform_users")
+        : Promise.resolve({ data: null, error: null }),
     ]);
 
+    const currentUserId = authRes.data.user?.id ?? undefined;
     const rawTickets = (ticketsResult.data ?? []) as SupportTicketRecord[];
     const orgs = (
       kind === "admin"
@@ -1488,13 +1516,24 @@ export async function WorkspaceContent({
     const userOrgIds = new Set(orgs.map((o) => o.id));
     const tickets = kind === "admin"
       ? rawTickets
-      : rawTickets.filter((t) => !t.organization_id || userOrgIds.has(t.organization_id));
+      : rawTickets.filter((t) =>
+          canPortalUserAccessSupportTicket(t, currentUserId, userOrgIds),
+        );
+
+    const staffMembers = kind === "admin" && Array.isArray(staffResult.data)
+      ? (staffResult.data as { user_id: string; email: string; display_name: string | null }[]).map((u) => ({
+          id: u.user_id,
+          label: u.display_name ? `${u.display_name} (${u.email})` : u.email,
+        }))
+      : [];
 
     return (
       <SupportManager
         tickets={tickets}
         isStaff={kind === "admin"}
         userOrganizations={orgs}
+        staffMembers={staffMembers}
+        currentUserId={currentUserId}
         notice={notice}
         queryError={ticketsResult.error?.message}
       />

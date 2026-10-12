@@ -24,7 +24,11 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   if (!article) {
     return { title: "Not found", robots: { index: false, follow: false } };
   }
-  return getPageMetadata(article.title, article.excerpt, `/blog/${article.slug}`);
+  return getPageMetadata(
+    article.seoTitle || article.title,
+    article.seoDescription || article.excerpt,
+    `/blog/${article.slug}`,
+  );
 }
 
 export default async function ArticlePage({ params }: Props) {
@@ -38,9 +42,10 @@ export default async function ArticlePage({ params }: Props) {
     { name: article.title, path: `/blog/${article.slug}` },
   ]);
   const articleSchema = getArticleStructuredData({
-    title: article.title,
-    description: article.excerpt,
+    title: article.seoTitle || article.title,
+    description: article.seoDescription || article.excerpt,
     path: `/blog/${article.slug}`,
+    datePublished: article.publishedAt ? article.publishedAt.slice(0, 10) : undefined,
   });
 
   return (

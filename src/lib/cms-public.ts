@@ -109,6 +109,9 @@ export type PublicArticle = {
   excerpt: string;
   readingTime: string;
   body: readonly string[];
+  seoTitle?: string | null;
+  seoDescription?: string | null;
+  publishedAt?: string | null;
 };
 
 export type PublicService = {
@@ -764,7 +767,7 @@ export const getPublishedArticles = unstable_cache(
       const supabase = getPublicSupabase();
       const { data, error } = await supabase
         .from("cms_posts")
-        .select("slug, title, excerpt, content, reading_time, category_id, cms_categories(name)")
+        .select("slug, title, excerpt, content, reading_time, seo_title, seo_description, published_at, category_id, cms_categories(name)")
         .eq("status", "published")
         .order("published_at", { ascending: false });
 
@@ -782,6 +785,9 @@ export const getPublishedArticles = unstable_cache(
           category: categoryName,
           readingTime: item.reading_time || "5 min read",
           body: paragraphs,
+          seoTitle: item.seo_title ?? null,
+          seoDescription: item.seo_description ?? null,
+          publishedAt: item.published_at ?? null,
         };
       });
     } catch {
@@ -842,6 +848,28 @@ export async function getPublishedCaseStudyBySlug(slug: string): Promise<Portfol
   const matched = allProjects.find((p) => p.slug === slug);
   return matched || null;
 }
+
+export const getPublishedPages = unstable_cache(
+  async (): Promise<PublicPage[]> => {
+    try {
+      const supabase = getPublicSupabase();
+      const { data, error } = await supabase
+        .from("cms_pages")
+        .select("slug, title, content, seo_title, seo_description, published_at")
+        .eq("status", "published")
+        .order("sort_order", { ascending: true });
+
+      if (!error && data) {
+        return data as PublicPage[];
+      }
+    } catch {
+      // Fallback
+    }
+    return [];
+  },
+  ["cms-pages-list"],
+  { tags: ["cms-public", "cms-pages"], revalidate: 3600 }
+);
 
 export const getPublishedPageBySlug = unstable_cache(
   async (slug: string): Promise<PublicPage | null> => {

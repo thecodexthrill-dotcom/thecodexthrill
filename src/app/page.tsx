@@ -11,7 +11,7 @@ import { FeaturedWorkEditorial } from "@/components/site/featured-work-editorial
 import { TechStackMatrix } from "@/components/site/tech-stack-matrix";
 import { EngineeringFaq } from "@/components/site/engineering-faq";
 import { ScrollReveal } from "@/components/ui/scroll-reveal";
-import { getPageMetadata } from "@/lib/seo";
+import { getFaqStructuredData, getPageMetadata } from "@/lib/seo";
 import {
   getPublishedHeroSettings,
   getPublishedHeroSlides,
@@ -50,8 +50,18 @@ export default async function HomePage() {
     getPublishedCaseStudies(),
   ]);
 
+  const faqSchema = faqs.length > 0 ? getFaqStructuredData(faqs) : null;
+
   return (
     <>
+      {faqSchema && (
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify(faqSchema).replace(/</g, "\\u003c"),
+          }}
+        />
+      )}
       {/* 1. Hero Editorial Section with Multi-Image Slideshow & Verification Strip */}
       <HeroEditorial settings={heroSettings} slides={heroSlides} />
 

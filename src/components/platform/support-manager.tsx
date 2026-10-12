@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { MessageSquare, Plus, CheckCircle, Trash2 } from "lucide-react";
+import { MessageSquare, Plus, CheckCircle, Trash2, UserCheck } from "lucide-react";
 import {
   createSupportTicketAction,
   addTicketMessageAction,
@@ -38,21 +38,54 @@ type SupportManagerProps = {
   tickets: SupportTicketRecord[];
   isStaff: boolean;
   userOrganizations?: { id: string; name: string }[];
+  staffMembers?: { id: string; label: string }[];
+  currentUserId?: string;
   notice?: string;
   queryError?: string;
 };
 
-export function SupportManager({ tickets, isStaff, userOrganizations = [], notice, queryError }: SupportManagerProps) {
+export function SupportManager({
+  tickets,
+  isStaff,
+  userOrganizations = [],
+  staffMembers = [],
+  currentUserId,
+  notice,
+  queryError,
+}: SupportManagerProps) {
   const [activeTicketId, setActiveTicketId] = useState<string | null>(tickets[0]?.id ?? null);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [assigneeFilter, setAssigneeFilter] = useState<string>("all");
+
+  const resolveAssigneeLabel = (userId: string | null) => {
+    if (!userId) return null;
+    const match = staffMembers.find((s) => s.id === userId);
+    return match ? match.label : "Assigned Engineer";
+  };
+
+  const resolveOrgName = (orgId: string | null) => {
+    if (!orgId) return null;
+    return userOrganizations.find((o) => o.id === orgId)?.name ?? null;
+  };
 
   const filteredTickets = tickets.filter((t) => {
-    if (statusFilter === "all") return true;
-    return t.status === statusFilter;
+    if (statusFilter !== "all" && t.status !== statusFilter) return false;
+    if (isStaff && assigneeFilter !== "all") {
+      if (assigneeFilter === "unassigned" && t.assigned_to !== null) return false;
+      if (assigneeFilter === "mine" && (!currentUserId || t.assigned_to !== currentUserId)) return false;
+      if (
+        assigneeFilter !== "unassigned" &&
+        assigneeFilter !== "mine" &&
+        t.assigned_to !== assigneeFilter
+      ) {
+        return false;
+      }
+    }
+    return true;
   });
 
-  const activeTicket = tickets.find((t) => t.id === activeTicketId);
+  const activeTicket = tickets.find((t) => t.id === activeTicketId) ?? filteredTickets[0] ?? null;
 
   return (
     <div className="workspace-content" style={{ display: "grid", gap: "24px" }}>
@@ -91,7 +124,7 @@ export function SupportManager({ tickets, isStaff, userOrganizations = [], notic
           </h2>
           <p style={{ margin: "4px 0 0", color: "var(--muted)", fontSize: "14px" }}>
             {isStaff
-              ? "Triage customer enquiries, reply to open threads, and manage issue resolution."
+              ? "Triage customer enquiries, assign engineering owners, reply to open threads, and manage issue resolution."
               : "Direct support from our engineering and technical team with guaranteed response times."}
           </p>
         </div>
@@ -197,7 +230,7 @@ export function SupportManager({ tickets, isStaff, userOrganizations = [], notic
       <div style={{ display: "grid", gridTemplateColumns: "minmax(300px, 1fr) 2fr", gap: "20px" }}>
         {/* Left Column: Ticket List */}
         <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
             {["all", "new", "in_progress", "waiting_on_client", "resolved"].map((st) => (
               <button
                 key={st}
@@ -218,12 +251,39 @@ export function SupportManager({ tickets, isStaff, userOrganizations = [], notic
             ))}
           </div>
 
+          {isStaff && (
+            <select
+              value={assigneeFilter}
+              onChange={(e) => setAssigneeFilter(e.target.value)}
+              aria-label="Filter support tickets by assigned staff"
+              style={{
+                fontSize: "12px",
+                padding: "6px 10px",
+                borderRadius: "6px",
+                border: "1px solid var(--border)",
+                background: "var(--surface, #111)",
+                color: "inherit",
+              }}
+            >
+              <option value="all">All Queue Owners ({tickets.length})</option>
+              {currentUserId && <option value="mine">Assigned to Me</option>}
+              <option value="unassigned">Unassigned Tickets</option>
+              {staffMembers.map((member) => (
+                <option key={member.id} value={member.id}>
+                  Owner: {member.label}
+                </option>
+              ))}
+            </select>
+          )}
+
           {filteredTickets.length === 0 ? (
             <p className="module-empty" style={{ margin: 0 }}>No tickets match the filter.</p>
           ) : (
             <div style={{ display: "grid", gap: "10px" }}>
               {filteredTickets.map((t) => {
-                const isSelected = t.id === activeTicketId;
+                const isSelected = t.id === activeTicket?.id;
+                const assigneeLabel = resolveAssigneeLabel(t.assigned_to);
+                const orgName = resolveOrgName(t.organization_id);
                 return (
                   <button
                     key={t.id}
@@ -242,9 +302,10 @@ export function SupportManager({ tickets, isStaff, userOrganizations = [], notic
                       color: "inherit",
                     }}
                   >
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "6px" }}>
                       <span style={{ fontSize: "11px", fontFamily: "monospace", color: "var(--muted)" }}>
                         {t.ticket_number}
+                        {orgName ? ` · ${orgName}` : ""}
                       </span>
                       <span
                         className="record-status"
@@ -261,9 +322,19 @@ export function SupportManager({ tickets, isStaff, userOrganizations = [], notic
 
                     <strong style={{ fontSize: "14px", lineHeight: "1.3" }}>{t.title}</strong>
 
-                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "var(--muted)" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "6px", fontSize: "11px", color: "var(--muted)" }}>
                       <span>Status: {t.status.replace(/_/g, " ")}</span>
                       <span>{new Date(t.created_at).toLocaleDateString()}</span>
+                    </div>
+
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "11px" }}>
+                      {assigneeLabel ? (
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: "4px", color: "var(--gold)" }}>
+                          <UserCheck size={11} /> {assigneeLabel}
+                        </span>
+                      ) : isStaff ? (
+                        <span style={{ color: "var(--muted)" }}>Unassigned</span>
+                      ) : null}
                     </div>
                   </button>
                 );
@@ -280,18 +351,37 @@ export function SupportManager({ tickets, isStaff, userOrganizations = [], notic
                 <div>
                   <span style={{ fontSize: "12px", fontFamily: "monospace", color: "var(--gold)" }}>
                     {activeTicket.ticket_number} · {activeTicket.category.toUpperCase()}
+                    {resolveOrgName(activeTicket.organization_id)
+                      ? ` · ${resolveOrgName(activeTicket.organization_id)}`
+                      : ""}
                   </span>
                   <h3 style={{ fontSize: "20px", margin: "4px 0 6px" }}>{activeTicket.title}</h3>
-                  <small style={{ color: "var(--muted)" }}>
-                    Submitted {new Date(activeTicket.created_at).toLocaleString()}
-                  </small>
+                  <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", alignItems: "center", fontSize: "12px", color: "var(--muted)" }}>
+                    <span>Submitted {new Date(activeTicket.created_at).toLocaleString()}</span>
+                    {activeTicket.assigned_to ? (
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: "4px", color: "var(--gold)", fontWeight: 600 }}>
+                        <UserCheck size={12} /> {resolveAssigneeLabel(activeTicket.assigned_to)}
+                      </span>
+                    ) : isStaff ? (
+                      <span>Owner: Unassigned</span>
+                    ) : null}
+                  </div>
                 </div>
 
                 {isStaff && (
-                  <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-                    <form action={updateTicketStatusAction} style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                  <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                    <form
+                      key={activeTicket.id}
+                      action={updateTicketStatusAction}
+                      style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}
+                    >
                       <input type="hidden" name="ticket_id" value={activeTicket.id} />
-                      <select name="status" defaultValue={activeTicket.status} style={{ fontSize: "12px", padding: "4px 8px" }}>
+                      <select
+                        name="status"
+                        defaultValue={activeTicket.status}
+                        aria-label="Ticket status"
+                        style={{ fontSize: "12px", padding: "4px 8px" }}
+                      >
                         <option value="new">New</option>
                         <option value="in_progress">In Progress</option>
                         <option value="waiting_on_client">Waiting on Client</option>
@@ -299,15 +389,34 @@ export function SupportManager({ tickets, isStaff, userOrganizations = [], notic
                         <option value="closed">Closed</option>
                       </select>
 
-                      <select name="priority" defaultValue={activeTicket.priority} style={{ fontSize: "12px", padding: "4px 8px" }}>
+                      <select
+                        name="priority"
+                        defaultValue={activeTicket.priority}
+                        aria-label="Ticket priority"
+                        style={{ fontSize: "12px", padding: "4px 8px" }}
+                      >
                         <option value="low">Low</option>
                         <option value="medium">Medium</option>
                         <option value="high">High</option>
                         <option value="urgent">Urgent</option>
                       </select>
 
+                      <select
+                        name="assigned_to"
+                        defaultValue={activeTicket.assigned_to ?? ""}
+                        aria-label="Assigned staff owner"
+                        style={{ fontSize: "12px", padding: "4px 8px" }}
+                      >
+                        <option value="">Unassigned</option>
+                        {staffMembers.map((member) => (
+                          <option key={member.id} value={member.id}>
+                            {member.label}
+                          </option>
+                        ))}
+                      </select>
+
                       <button type="submit" className="button button-secondary" style={{ padding: "4px 8px", fontSize: "12px" }}>
-                        Update Status
+                        Save Triage
                       </button>
                     </form>
                     <form

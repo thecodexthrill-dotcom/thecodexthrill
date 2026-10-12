@@ -8,9 +8,12 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { requireWorkspace } from "@/lib/supabase/access";
 import {
   calculateProjectTaskProgress,
+  canPortalUserAccessOrganization,
+  canPortalUserAccessSupportTicket,
   formatDeliveryDescription,
   parseDeliveryDescription,
   parseInvoiceItems,
+  resolvePortalTicketOrganizationId,
   type InvoiceLineItem,
   type InvoicePaymentRecord,
 } from "@/lib/supabase/delivery-operations-helper";
@@ -22,6 +25,22 @@ import {
 } from "@/lib/supabase/notification-service";
 import { logSanitizedOperationalEvent } from "@/lib/supabase/platform-health-helper";
 import { runWorkflowAutomationSweep } from "@/lib/supabase/workflow-automation";
+
+async function getUserActiveOrganizationIds(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+): Promise<string[]> {
+  const { data } = await supabase
+    .from("organization_memberships")
+    .select("organization_id, organizations!inner(status)")
+    .eq("user_id", userId)
+    .eq("status", "active")
+    .eq("organizations.status", "active");
+
+  return (data ?? [])
+    .map((row) => row.organization_id as string)
+    .filter(Boolean);
+}
 
 async function syncProjectTaskProgress(projectId: string) {
   try {
@@ -99,6 +118,21 @@ export async function createSupportTicketAction(formData: FormData) {
 
   const supabase = await createClient();
 
+  let resolvedOrganizationId: string | null = parsed.data.organization_id || null;
+  if (!isAdmin) {
+    const activeOrgIds = await getUserActiveOrganizationIds(supabase, user.id);
+    resolvedOrganizationId = resolvePortalTicketOrganizationId(
+      parsed.data.organization_id,
+      activeOrgIds,
+    );
+    if (
+      parsed.data.organization_id &&
+      !canPortalUserAccessOrganization(parsed.data.organization_id, activeOrgIds)
+    ) {
+      redirect("/access-denied");
+    }
+  }
+
   // Generate readable ticket number
   const ticketNumber = `TICK-${Date.now().toString(36).toUpperCase()}-${Math.floor(Math.random() * 900 + 100)}`;
 
@@ -106,7 +140,7 @@ export async function createSupportTicketAction(formData: FormData) {
     .from("support_tickets")
     .insert({
       ticket_number: ticketNumber,
-      organization_id: parsed.data.organization_id || null,
+      organization_id: resolvedOrganizationId,
       customer_id: user.id,
       title: parsed.data.title,
       category: parsed.data.category,
@@ -184,6 +218,23 @@ export async function addTicketMessageAction(formData: FormData) {
     redirect(`${returnPath}?error=invalid`);
   }
 
+  const { data: ticket } = await supabase
+    .from("support_tickets")
+    .select("status, ticket_number, customer_id, organization_id, assigned_to")
+    .eq("id", ticketId.data)
+    .single();
+
+  if (!ticket) {
+    redirect(`${returnPath}?error=invalid`);
+  }
+
+  if (!isStaff) {
+    const activeOrgIds = await getUserActiveOrganizationIds(supabase, user.id);
+    if (!canPortalUserAccessSupportTicket(ticket, user.id, activeOrgIds)) {
+      redirect("/access-denied");
+    }
+  }
+
   const { error } = await supabase.from("support_ticket_messages").insert({
     ticket_id: ticketId.data,
     sender_id: user.id,
@@ -196,13 +247,7 @@ export async function addTicketMessageAction(formData: FormData) {
   }
 
   // Automatic ticket lifecycle transition
-  const { data: ticket } = await supabase
-    .from("support_tickets")
-    .select("status, ticket_number, customer_id, assigned_to")
-    .eq("id", ticketId.data)
-    .single();
-
-  if (ticket && ticket.status !== "closed") {
+  if (ticket.status !== "closed") {
     let nextStatus: string | null = null;
     if (isStaff && ticket.status !== "waiting_on_client") {
       nextStatus = "waiting_on_client";
@@ -271,19 +316,45 @@ export async function updateTicketStatusAction(formData: FormData) {
   const status = z.enum(["new", "in_progress", "waiting_on_client", "resolved", "closed"]).safeParse(formData.get("status"));
   const priority = z.enum(["low", "medium", "high", "urgent"]).safeParse(formData.get("priority"));
 
-  if (!ticketId.success || !status.success) {
+  const hasAssignedField = formData.has("assigned_to");
+  const rawAssignedTo = formData.get("assigned_to");
+  let nextAssignedTo: string | null | undefined = undefined;
+
+  if (hasAssignedField) {
+    if (
+      typeof rawAssignedTo !== "string" ||
+      !rawAssignedTo.trim() ||
+      rawAssignedTo.trim() === "unassigned"
+    ) {
+      nextAssignedTo = null;
+    } else {
+      const parsedAssignee = z.string().uuid().safeParse(rawAssignedTo.trim());
+      if (!parsedAssignee.success) {
+        redirect("/admin/support?error=invalid");
+      }
+      nextAssignedTo = parsedAssignee.data;
+    }
+  }
+
+  if (!ticketId.success || (!status.success && !hasAssignedField)) {
     redirect("/admin/support?error=invalid");
   }
 
   const supabase = await createClient();
   const { data: existingTicket } = await supabase
     .from("support_tickets")
-    .select("ticket_number, title, customer_id, status")
+    .select("ticket_number, title, customer_id, status, assigned_to")
     .eq("id", ticketId.data)
     .single();
 
+  if (!existingTicket) {
+    redirect("/admin/support?error=invalid");
+  }
+
+  const effectiveStatus = status.success ? status.data : existingTicket.status;
+
   const updateData: Record<string, unknown> = {
-    status: status.data,
+    status: effectiveStatus,
     updated_at: new Date().toISOString(),
   };
 
@@ -291,9 +362,13 @@ export async function updateTicketStatusAction(formData: FormData) {
     updateData.priority = priority.data;
   }
 
-  if (status.data === "resolved" || status.data === "closed") {
+  if (nextAssignedTo !== undefined) {
+    updateData.assigned_to = nextAssignedTo;
+  }
+
+  if (effectiveStatus === "resolved" || effectiveStatus === "closed") {
     updateData.resolved_at = new Date().toISOString();
-  } else {
+  } else if (status.success) {
     updateData.resolved_at = null;
   }
 
@@ -307,15 +382,14 @@ export async function updateTicketStatusAction(formData: FormData) {
   }
 
   if (
-    existingTicket &&
     existingTicket.customer_id &&
     existingTicket.customer_id !== user.id &&
-    existingTicket.status !== status.data
+    existingTicket.status !== effectiveStatus
   ) {
     await dispatchUserNotification({
       userId: existingTicket.customer_id,
       title: `Support Ticket #${existingTicket.ticket_number} Updated`,
-      message: `Ticket "${existingTicket.title}" status is now ${status.data.replace("_", " ")}.`,
+      message: `Ticket "${existingTicket.title}" status is now ${effectiveStatus.replace("_", " ")}.`,
       type: "ticket",
       linkUrl: "/portal/support",
       recipientWorkspace: "portal",
@@ -323,9 +397,26 @@ export async function updateTicketStatusAction(formData: FormData) {
     });
   }
 
+  if (
+    nextAssignedTo &&
+    nextAssignedTo !== existingTicket.assigned_to &&
+    nextAssignedTo !== user.id
+  ) {
+    await dispatchUserNotification({
+      userId: nextAssignedTo,
+      title: `Support Ticket #${existingTicket.ticket_number} Assigned`,
+      message: `Ticket "${existingTicket.title}" has been assigned to you.`,
+      type: "ticket",
+      linkUrl: "/admin/support",
+      recipientWorkspace: "admin",
+      dedupeWindowMinutes: 2,
+    });
+  }
+
   revalidatePath("/admin/support");
   revalidatePath("/portal/support");
   revalidatePath("/portal/notifications");
+  revalidatePath("/admin/notifications");
   redirect("/admin/support?updated=1");
 }
 
@@ -520,6 +611,13 @@ export async function createTaskAction(formData: FormData) {
     redirect(`${returnPath}?error=invalid`);
   }
 
+  if (isPortal) {
+    const activeOrgIds = await getUserActiveOrganizationIds(supabase, user.id);
+    if (!canPortalUserAccessOrganization(project.organization_id, activeOrgIds)) {
+      redirect("/access-denied");
+    }
+  }
+
   const parsedDesc = parseDeliveryDescription(parsed.data.description);
   const formattedDescription = formatDeliveryDescription({
     milestone: parsed.data.milestone || parsedDesc.milestone,
@@ -569,7 +667,7 @@ export async function createTaskAction(formData: FormData) {
 export async function updateTaskStatusAction(formData: FormData) {
   const isPortal = formData.get("return_path") === "portal";
   const returnPath = isPortal ? "/portal/tasks" : "/admin/tasks";
-  await requireWorkspace(isPortal ? "portal" : "admin", ["tasks"]);
+  const { user } = await requireWorkspace(isPortal ? "portal" : "admin", ["tasks"]);
 
   const taskId = z.string().uuid().safeParse(formData.get("id"));
   const status = z.enum(["todo", "in_progress", "review", "done"]).safeParse(formData.get("status"));
@@ -581,9 +679,20 @@ export async function updateTaskStatusAction(formData: FormData) {
   const supabase = await createClient();
   const { data: existingTask } = await supabase
     .from("tenant_tasks")
-    .select("project_id")
+    .select("project_id, organization_id")
     .eq("id", taskId.data)
     .single();
+
+  if (!existingTask) {
+    redirect(`${returnPath}?error=invalid`);
+  }
+
+  if (isPortal) {
+    const activeOrgIds = await getUserActiveOrganizationIds(supabase, user.id);
+    if (!canPortalUserAccessOrganization(existingTask.organization_id, activeOrgIds)) {
+      redirect("/access-denied");
+    }
+  }
 
   const { error } = await supabase
     .from("tenant_tasks")
@@ -594,7 +703,7 @@ export async function updateTaskStatusAction(formData: FormData) {
     redirect(`${returnPath}?error=save`);
   }
 
-  if (existingTask?.project_id) {
+  if (existingTask.project_id) {
     await syncProjectTaskProgress(existingTask.project_id);
   }
 
@@ -635,12 +744,19 @@ export async function updateTaskAction(formData: FormData) {
   const supabase = await createClient();
   const { data: existingTask } = await supabase
     .from("tenant_tasks")
-    .select("project_id, description, assigned_to")
+    .select("project_id, organization_id, description, assigned_to")
     .eq("id", taskId.data)
     .single();
 
   if (!existingTask) {
     redirect(`${returnPath}?error=invalid`);
+  }
+
+  if (isPortal) {
+    const activeOrgIds = await getUserActiveOrganizationIds(supabase, user.id);
+    if (!canPortalUserAccessOrganization(existingTask.organization_id, activeOrgIds)) {
+      redirect("/access-denied");
+    }
   }
 
   const existingParsed = parseDeliveryDescription(existingTask.description);
@@ -714,7 +830,7 @@ export async function updateTaskAction(formData: FormData) {
 export async function deleteTaskAction(formData: FormData) {
   const isPortal = formData.get("return_path") === "portal";
   const returnPath = isPortal ? "/portal/tasks" : "/admin/tasks";
-  await requireWorkspace(isPortal ? "portal" : "admin", ["tasks"]);
+  const { user } = await requireWorkspace(isPortal ? "portal" : "admin", ["tasks"]);
 
   const taskId = z.string().uuid().safeParse(formData.get("id"));
 
@@ -725,16 +841,27 @@ export async function deleteTaskAction(formData: FormData) {
   const supabase = await createClient();
   const { data: existingTask } = await supabase
     .from("tenant_tasks")
-    .select("project_id")
+    .select("project_id, organization_id")
     .eq("id", taskId.data)
     .single();
+
+  if (!existingTask) {
+    redirect(`${returnPath}?error=invalid`);
+  }
+
+  if (isPortal) {
+    const activeOrgIds = await getUserActiveOrganizationIds(supabase, user.id);
+    if (!canPortalUserAccessOrganization(existingTask.organization_id, activeOrgIds)) {
+      redirect("/access-denied");
+    }
+  }
 
   const { error } = await supabase.from("tenant_tasks").delete().eq("id", taskId.data);
   if (error) {
     redirect(`${returnPath}?error=save`);
   }
 
-  if (existingTask?.project_id) {
+  if (existingTask.project_id) {
     await syncProjectTaskProgress(existingTask.project_id);
   }
 
@@ -773,6 +900,25 @@ export async function createDocumentRecordAction(formData: FormData) {
   }
 
   const supabase = await createClient();
+
+  if (isPortal) {
+    const activeOrgIds = await getUserActiveOrganizationIds(supabase, user.id);
+    if (!canPortalUserAccessOrganization(organizationId.data, activeOrgIds)) {
+      redirect("/access-denied");
+    }
+  }
+
+  if (projectId) {
+    const { data: linkedProject } = await supabase
+      .from("tenant_projects")
+      .select("organization_id")
+      .eq("id", projectId)
+      .maybeSingle();
+
+    if (!linkedProject || linkedProject.organization_id !== organizationId.data) {
+      redirect(`${returnPath}?error=invalid`);
+    }
+  }
 
   const file = formData.get("file");
   let fileUrl = (formData.get("file_url") as string)?.trim() || "";
@@ -862,7 +1008,7 @@ export async function deleteDocumentAction(formData: FormData) {
   const isPortal = formData.get("return_path") === "portal";
   const returnPath = isPortal ? "/portal/files" : "/admin/files";
 
-  await requireWorkspace(isPortal ? "portal" : "admin", ["files"]);
+  const { user } = await requireWorkspace(isPortal ? "portal" : "admin", ["files"]);
 
   if (!id.success) {
     redirect(`${returnPath}?error=invalid`);
@@ -871,16 +1017,30 @@ export async function deleteDocumentAction(formData: FormData) {
   const supabase = await createClient();
   const { data: doc } = await supabase
     .from("tenant_documents")
-    .select("file_url")
+    .select("file_url, organization_id, uploaded_by")
     .eq("id", id.data)
     .single();
+
+  if (!doc) {
+    redirect(`${returnPath}?error=invalid`);
+  }
+
+  if (isPortal) {
+    const activeOrgIds = await getUserActiveOrganizationIds(supabase, user.id);
+    if (
+      !canPortalUserAccessOrganization(doc.organization_id, activeOrgIds) ||
+      doc.uploaded_by !== user.id
+    ) {
+      redirect("/access-denied");
+    }
+  }
 
   const { error } = await supabase.from("tenant_documents").delete().eq("id", id.data);
   if (error) {
     redirect(`${returnPath}?error=save`);
   }
 
-  if (doc?.file_url?.includes("tenant-documents/")) {
+  if (doc.file_url?.includes("tenant-documents/")) {
     try {
       const adminClient = createAdminClient();
       const storagePath = doc.file_url.split("tenant-documents/")[1]?.split("?")[0];

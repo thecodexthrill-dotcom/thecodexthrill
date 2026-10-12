@@ -38,8 +38,20 @@ Deliver leads, follow-up, customer portal, project/task/milestone workflows, ful
 
 Add approved event delivery channels/preferences, in-app history/read state, email and opt-in/revocable web push, monitoring, rate limits, abuse handling, recovery exercises, and accessibility/performance refinements. Acceptance: permission denial/revocation, delivery failure/retry behavior, no sensitive push payloads, offline fallback with no private-data caching, and recovery evidence are documented and verified.
 
-## Phase 8 â€” Production readiness and launch review
+## Phase 8 — Complete core product roadmap (completed on branch)
 
-Complete security review, dependency and secret scans, privacy/legal review, backups and restore drill, incident/runbook ownership, observability, load/performance checks, deployment rollback, and business acceptance. Production deployment requires explicit approval.
+Completed end-to-end delivery across:
+- **Client Delivery & Support:** Project milestones, tasks, staff assignments, deliverables, client-visible progress, support ticket lifecycle with staff queue ownership (`assigned_to`), conversations, status transitions, client notifications, and strict client organization isolation (`delivery-operations-helper.ts`).
+- **CMS & Public Website:** Unified CMS publishing for pages, insights/blog posts, services, case studies, media library (`cms_media`), navigation menus (`cms_menus`, `cms_menu_items`), revision snapshots with one-click rollback (`cms_revisions`), and tag-based cache invalidation (`cms-public`).
+- **Billing & Business Operations:** Multi-line-item invoices, project linkage, due dates, overdue escalation, verified manual payment settlement (`recordInvoicePaymentAction` with method/reference/audit confirmation), receivables reporting, and financial history preservation without claiming unconfigured online payment gateways.
+- **Notifications & Workflows:** Delivery state tracking (`queued`, `sent`, `failed`, `skipped`), retry queue processing, idempotent workflow execution (`workflow_runs`), mandatory security alerts, and `CRON_SECRET`-protected `/api/internal/workflows/run`.
+- **Super Admin Governance:** Role/permission management, invitation lifecycle, last-Super-Admin invariant protection, immutable audit history, and tombstone organization deletion (`preserve_as_platform_tombstone`).
 
-Billing, proposals, advanced analytics, automation, AI, and promotion capabilities are future feature areas, separately prioritized after core operations with their own requirements, architecture/API contracts, data-use review, tests, and approval gates; no delivery dates are promised.
+## Phase 9 — Platform quality, technical SEO, and operational readiness (completed on branch)
+
+Completed across:
+- **Accessibility & Responsive UI:** Semantic landmarks, keyboard navigation, accessible forms/tabs/tables, light/dark theme parity, and mobile/tablet/desktop responsiveness.
+- **Technical SEO & Structured Data:** Dynamic metadata, canonical URLs, Open Graph/Twitter cards, dynamic `sitemap.xml` merging static routes with published CMS pages/articles/services/case studies, `robots.txt` blocking private routes, and JSON-LD structured data (`Organization`, `WebSite`, `ProfessionalService`, `Service`, `BlogPosting`, `CreativeWork`, `FAQPage`, `BreadcrumbList`).
+- **PWA & Offline Isolation:** Installable manifest, service worker with strict network-only handling for `/admin`, `/portal`, `/workspace`, `/api`, and `/auth` routes, and full cache eviction on sign-out/account switch.
+- **Observability & Runbooks:** Health check endpoint (`/api/health`), rate-limiting and origin validation on sensitive endpoints, and documented backup/restore and incident rollback procedures in `docs/VERCEL-SUPABASE.md`.
+

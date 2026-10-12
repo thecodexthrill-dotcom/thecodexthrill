@@ -393,3 +393,72 @@ export function classifyInvoiceLifecycleStatus(invoice: {
   };
 }
 
+// ============================================================================
+// Client Portal Tenant Isolation & Support Ticket Helpers
+// ============================================================================
+
+/**
+ * Verifies that a Client Portal user has active membership in the target organization.
+ * Returns false if organizationId is null/empty or not in activeOrganizationIds.
+ */
+export function canPortalUserAccessOrganization(
+  organizationId: string | null | undefined,
+  activeOrganizationIds: Iterable<string>,
+): boolean {
+  const normalizedOrgId = organizationId?.trim();
+  if (!normalizedOrgId) return false;
+  const orgSet =
+    activeOrganizationIds instanceof Set
+      ? activeOrganizationIds
+      : new Set(activeOrganizationIds);
+  return orgSet.has(normalizedOrgId);
+}
+
+/**
+ * Verifies whether a Client Portal user is permitted to view or reply to a support ticket.
+ * Unlike a permissive `!ticket.organization_id` check (which leaks unassigned-org tickets),
+ * a portal user may access a ticket ONLY if:
+ * 1. The ticket belongs to an organization in the user's activeOrganizationIds, OR
+ * 2. The ticket was created directly by this user (`ticket.customer_id === userId`).
+ */
+export function canPortalUserAccessSupportTicket(
+  ticket: {
+    customer_id?: string | null;
+    organization_id?: string | null;
+  },
+  userId: string | null | undefined,
+  activeOrganizationIds: Iterable<string>,
+): boolean {
+  if (
+    ticket.organization_id &&
+    canPortalUserAccessOrganization(ticket.organization_id, activeOrganizationIds)
+  ) {
+    return true;
+  }
+  const normalizedUserId = userId?.trim();
+  if (normalizedUserId && ticket.customer_id === normalizedUserId) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Resolves a validated organization_id for a support ticket submitted from the Client Portal.
+ * Prevents cross-tenant organization_id spoofing by restricting to active memberships,
+ * or defaulting to the user's primary active organization when omitted.
+ */
+export function resolvePortalTicketOrganizationId(
+  requestedOrganizationId: string | null | undefined,
+  activeOrganizationIds: Iterable<string>,
+): string | null {
+  const orgList = Array.from(activeOrganizationIds).filter((id) =>
+    Boolean(id?.trim()),
+  );
+  const requested = requestedOrganizationId?.trim() || null;
+  if (requested && orgList.includes(requested)) {
+    return requested;
+  }
+  return orgList[0] ?? null;
+}
+
+

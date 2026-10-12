@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import { Edit2, Plus, Trash2, Eye, EyeOff, Layers, Terminal, Compass, Landmark, Cpu, HelpCircle } from "lucide-react";
+import { Edit2, Plus, Trash2, Eye, EyeOff, Layers, Terminal, Compass, Landmark, Cpu, HelpCircle, RotateCcw } from "lucide-react";
 import {
   saveCmsPageAction,
   deleteCmsPageAction,
@@ -25,6 +25,11 @@ import {
   deleteCmsTechStackAction,
   saveCmsFaqAction,
   deleteCmsFaqAction,
+  saveCmsMediaAction,
+  deleteCmsMediaAction,
+  saveCmsMenuItemAction,
+  deleteCmsMenuItemAction,
+  restoreCmsRevisionAction,
   type CmsActionState,
 } from "@/lib/supabase/cms-actions";
 
@@ -1885,7 +1890,434 @@ export function CmsFaqManager({ faqs }: { faqs: CmsFaqRecord[] }) {
 }
 
 // ============================================================================
-// 12. Unified Super Admin CMS Hub Component (Tabbed Architecture)
+// 12. Media Library, Navigation Menus & Content Revisions Managers
+// ============================================================================
+
+export type CmsMediaRecord = {
+  id: string;
+  file_name: string;
+  storage_path: string;
+  public_url: string;
+  mime_type: string;
+  file_size_bytes: number;
+  category: string;
+  alt_text: string;
+  is_archived: boolean;
+  created_at: string;
+};
+
+export function CmsMediaManager({ media }: { media: CmsMediaRecord[] }) {
+  const [saveState, saveAction, savePending] = useActionState(saveCmsMediaAction, initialState);
+  const [deleteState, deleteAction, deletePending] = useActionState(deleteCmsMediaAction, initialState);
+  const [editingItem, setEditingItem] = useState<CmsMediaRecord | null>(null);
+  const [isCreating, setIsCreating] = useState(false);
+
+  return (
+    <div className="workspace-content">
+      <section className="module-panel">
+        <div className="module-heading" style={{ marginTop: 0 }}>
+          <div>
+            <p className="eyebrow">CMS ENGINE · MEDIA ASSETS</p>
+            <h2>Public media library</h2>
+            <p>Register and govern public hero banners, case study cover graphics, and accessible alt text metadata.</p>
+          </div>
+          <button
+            className="button button-gold module-heading-action"
+            onClick={() => {
+              setEditingItem(null);
+              setIsCreating(!isCreating);
+            }}
+            type="button"
+          >
+            <Plus size={16} /> {isCreating ? "Close Form" : "Register Media Asset"}
+          </button>
+        </div>
+
+        {saveState.error && <p className="module-alert" role="alert">{saveState.error}</p>}
+        {saveState.message && <p className="module-success" role="status">{saveState.message}</p>}
+        {deleteState.error && <p className="module-alert" role="alert">{deleteState.error}</p>}
+        {deleteState.message && <p className="module-success" role="status">{deleteState.message}</p>}
+
+        {(isCreating || editingItem) && (
+          <form
+            action={saveAction}
+            className="auth-form lead-create-form"
+            style={{ marginTop: "24px", marginBottom: "32px", padding: "20px", border: "1px solid var(--line)", borderRadius: "14px", background: "var(--surface-raised)" }}
+          >
+            {editingItem && <input name="id" type="hidden" value={editingItem.id} />}
+            <label>
+              Asset File Name *
+              <input defaultValue={editingItem?.file_name ?? ""} name="file_name" placeholder="thecodexthrill-banner.jpg" required type="text" />
+            </label>
+            <label>
+              Public Asset URL / Path *
+              <input defaultValue={editingItem?.public_url ?? ""} name="public_url" placeholder="/brand/thecodexthrill-banner.jpg" required type="text" />
+            </label>
+            <label>
+              Category
+              <select defaultValue={editingItem?.category ?? "general"} name="category">
+                <option value="general">General</option>
+                <option value="hero">Hero Banner</option>
+                <option value="portfolio">Case Study / Portfolio</option>
+                <option value="blog">Blog / Insights</option>
+                <option value="brand">Brand Identity</option>
+              </select>
+            </label>
+            <label>
+              MIME Type
+              <input defaultValue={editingItem?.mime_type ?? "image/jpeg"} name="mime_type" placeholder="image/jpeg" type="text" />
+            </label>
+            <label style={{ gridColumn: "1 / -1" }}>
+              Accessible Alt Text *
+              <input defaultValue={editingItem?.alt_text ?? ""} name="alt_text" placeholder="Descriptive alt text for screen readers and SEO" required type="text" />
+            </label>
+            <div style={{ display: "flex", gap: "10px", gridColumn: "1 / -1" }}>
+              <button className="button button-gold" disabled={savePending} type="submit">
+                {savePending ? "Saving Asset…" : editingItem ? "Update Asset" : "Register Asset"}
+              </button>
+              <button
+                className="button button-secondary"
+                onClick={() => {
+                  setEditingItem(null);
+                  setIsCreating(false);
+                }}
+                type="button"
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        )}
+
+        <div className="module-table-wrap" style={{ marginTop: "20px" }}>
+          <table className="module-table">
+            <thead>
+              <tr>
+                <th>Asset Name &amp; URL</th>
+                <th>Category</th>
+                <th>Alt Text</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {media.length === 0 ? (
+                <tr>
+                  <td colSpan={4} style={{ textAlign: "center", padding: "24px" }}>
+                    No media assets registered yet. Click &quot;Register Media Asset&quot; to add public visual assets.
+                  </td>
+                </tr>
+              ) : (
+                media.map((m) => (
+                  <tr key={m.id}>
+                    <td>
+                      <strong>{m.file_name}</strong>
+                      <small>{m.public_url}</small>
+                    </td>
+                    <td><span className="record-status">{m.category}</span></td>
+                    <td><small>{m.alt_text || "—"}</small></td>
+                    <td>
+                      <div style={{ display: "flex", gap: "8px" }}>
+                        <button
+                          className="button button-small button-secondary"
+                          onClick={() => {
+                            setIsCreating(false);
+                            setEditingItem(m);
+                          }}
+                          type="button"
+                        >
+                          <Edit2 size={13} /> Edit
+                        </button>
+                        <form action={deleteAction}>
+                          <input name="id" type="hidden" value={m.id} />
+                          <button className="button button-small button-danger" disabled={deletePending} type="submit">
+                            <Trash2 size={13} />
+                          </button>
+                        </form>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+export type CmsMenuRecord = {
+  id: string;
+  code: string;
+  title: string;
+};
+
+export type CmsMenuItemRecord = {
+  id: string;
+  menu_id: string;
+  label: string;
+  href: string;
+  is_external: boolean;
+  sort_order: number;
+  is_visible: boolean;
+};
+
+export function CmsNavigationManager({
+  menus,
+  menuItems,
+}: {
+  menus: CmsMenuRecord[];
+  menuItems: CmsMenuItemRecord[];
+}) {
+  const [saveState, saveAction, savePending] = useActionState(saveCmsMenuItemAction, initialState);
+  const [deleteState, deleteAction, deletePending] = useActionState(deleteCmsMenuItemAction, initialState);
+  const [editingItem, setEditingItem] = useState<(CmsMenuItemRecord & { menuCode: string }) | null>(null);
+  const [isCreating, setIsCreating] = useState(false);
+
+  const resolveMenuCode = (menuId: string) => {
+    return menus.find((m) => m.id === menuId)?.code ?? "header";
+  };
+
+  return (
+    <div className="workspace-content">
+      <section className="module-panel">
+        <div className="module-heading" style={{ marginTop: 0 }}>
+          <div>
+            <p className="eyebrow">CMS ENGINE · NAVIGATION MENUS</p>
+            <h2>Header &amp; footer navigation links</h2>
+            <p>Manage structured navigation links across the primary header and footer link groups.</p>
+          </div>
+          <button
+            className="button button-gold module-heading-action"
+            onClick={() => {
+              setEditingItem(null);
+              setIsCreating(!isCreating);
+            }}
+            type="button"
+          >
+            <Plus size={16} /> {isCreating ? "Close Editor" : "Add Navigation Link"}
+          </button>
+        </div>
+
+        {saveState.error && <p className="module-alert" role="alert">{saveState.error}</p>}
+        {saveState.message && <p className="module-success" role="status">{saveState.message}</p>}
+        {deleteState.error && <p className="module-alert" role="alert">{deleteState.error}</p>}
+        {deleteState.message && <p className="module-success" role="status">{deleteState.message}</p>}
+
+        {(isCreating || editingItem) && (
+          <form
+            action={saveAction}
+            className="auth-form lead-create-form"
+            style={{ marginTop: "24px", marginBottom: "32px", padding: "20px", border: "1px solid var(--line)", borderRadius: "14px", background: "var(--surface-raised)" }}
+          >
+            {editingItem && <input name="id" type="hidden" value={editingItem.id} />}
+            <label>
+              Menu Group *
+              <select defaultValue={editingItem?.menuCode ?? "header"} name="menu_code">
+                <option value="header">Primary Header Navigation</option>
+                <option value="footer_services">Footer: Services</option>
+                <option value="footer_company">Footer: Company</option>
+                <option value="footer_platform">Footer: Platform</option>
+                <option value="footer_legal">Footer: Trust &amp; Legal</option>
+              </select>
+            </label>
+            <label>
+              Link Label *
+              <input defaultValue={editingItem?.label ?? ""} name="label" placeholder="Services" required type="text" />
+            </label>
+            <label>
+              Target Path / URL *
+              <input defaultValue={editingItem?.href ?? ""} name="href" placeholder="/services" required type="text" />
+            </label>
+            <label>
+              Sort Order
+              <input defaultValue={editingItem?.sort_order ?? 0} name="sort_order" type="number" />
+            </label>
+            <label>
+              Visibility
+              <select defaultValue={editingItem?.is_visible === false ? "false" : "true"} name="is_visible">
+                <option value="true">Visible</option>
+                <option value="false">Hidden</option>
+              </select>
+            </label>
+            <label>
+              External Link
+              <select defaultValue={editingItem?.is_external ? "true" : "false"} name="is_external">
+                <option value="false">Internal Route</option>
+                <option value="true">External URL</option>
+              </select>
+            </label>
+            <div style={{ display: "flex", gap: "10px", gridColumn: "1 / -1" }}>
+              <button className="button button-gold" disabled={savePending} type="submit">
+                {savePending ? "Saving Link…" : editingItem ? "Update Link" : "Create Link"}
+              </button>
+              <button
+                className="button button-secondary"
+                onClick={() => {
+                  setEditingItem(null);
+                  setIsCreating(false);
+                }}
+                type="button"
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        )}
+
+        <div className="module-table-wrap" style={{ marginTop: "20px" }}>
+          <table className="module-table">
+            <thead>
+              <tr>
+                <th>Menu Group</th>
+                <th>Label &amp; Path</th>
+                <th>Order</th>
+                <th>Visibility</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {menuItems.length === 0 ? (
+                <tr>
+                  <td colSpan={5} style={{ textAlign: "center", padding: "24px" }}>
+                    No custom navigation overrides configured. Default site header and footer navigation links are active.
+                  </td>
+                </tr>
+              ) : (
+                menuItems.map((item) => {
+                  const menuCode = resolveMenuCode(item.menu_id);
+                  return (
+                    <tr key={item.id}>
+                      <td><span className="record-status">{menuCode}</span></td>
+                      <td>
+                        <strong>{item.label}</strong>
+                        <small>{item.href}</small>
+                      </td>
+                      <td>{item.sort_order}</td>
+                      <td>{item.is_visible ? "Visible" : "Hidden"}</td>
+                      <td>
+                        <div style={{ display: "flex", gap: "8px" }}>
+                          <button
+                            className="button button-small button-secondary"
+                            onClick={() => {
+                              setIsCreating(false);
+                              setEditingItem({ ...item, menuCode });
+                            }}
+                            type="button"
+                          >
+                            <Edit2 size={13} /> Edit
+                          </button>
+                          <form action={deleteAction}>
+                            <input name="id" type="hidden" value={item.id} />
+                            <button className="button button-small button-danger" disabled={deletePending} type="submit">
+                              <Trash2 size={13} />
+                            </button>
+                          </form>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+export type CmsRevisionRecord = {
+  id: string;
+  entity_type: string;
+  entity_id: string;
+  action: string;
+  snapshot: Record<string, unknown>;
+  actor_id: string | null;
+  created_at: string;
+};
+
+export function CmsRevisionsManager({ revisions }: { revisions: CmsRevisionRecord[] }) {
+  const [restoreState, restoreAction, restorePending] = useActionState(restoreCmsRevisionAction, initialState);
+
+  return (
+    <div className="workspace-content">
+      <section className="module-panel">
+        <p className="eyebrow">CMS ENGINE · AUDIT &amp; VERSION HISTORY</p>
+        <h2>Content revision snapshots</h2>
+        <p>Immutable version trail of CMS changes across pages, articles, services, and site settings with one-click snapshot rollback.</p>
+
+        {restoreState.error && <p className="module-alert" role="alert">{restoreState.error}</p>}
+        {restoreState.message && <p className="module-success" role="status">{restoreState.message}</p>}
+
+        <div className="module-table-wrap" style={{ marginTop: "20px" }}>
+          <table className="module-table">
+            <thead>
+              <tr>
+                <th>Timestamp</th>
+                <th>Entity Type</th>
+                <th>Action</th>
+                <th>Snapshot Summary</th>
+                <th>Rollback</th>
+              </tr>
+            </thead>
+            <tbody>
+              {revisions.length === 0 ? (
+                <tr>
+                  <td colSpan={5} style={{ textAlign: "center", padding: "24px" }}>
+                    No CMS revisions recorded yet. Every save or publication automatically creates a snapshot here.
+                  </td>
+                </tr>
+              ) : (
+                revisions.map((rev) => {
+                  const snap = rev.snapshot ?? {};
+                  const label =
+                    (typeof snap.title === "string" && snap.title) ||
+                    (typeof snap.name === "string" && snap.name) ||
+                    (typeof snap.key === "string" && snap.key) ||
+                    rev.entity_id.slice(0, 8);
+                  const canRestore = ["page", "post", "service", "setting"].includes(rev.entity_type);
+
+                  return (
+                    <tr key={rev.id}>
+                      <td><small>{new Date(rev.created_at).toLocaleString()}</small></td>
+                      <td><span className="record-status">{rev.entity_type}</span></td>
+                      <td><strong style={{ textTransform: "uppercase", fontSize: "11px" }}>{rev.action}</strong></td>
+                      <td>
+                        <strong>{label}</strong>
+                        {typeof snap.slug === "string" && <small>/{snap.slug}</small>}
+                      </td>
+                      <td>
+                        {canRestore ? (
+                          <form action={restoreAction}>
+                            <input name="revision_id" type="hidden" value={rev.id} />
+                            <button
+                              className="button button-small button-secondary"
+                              disabled={restorePending}
+                              type="submit"
+                              title="Restore this snapshot"
+                            >
+                              <RotateCcw size={13} /> Restore
+                            </button>
+                          </form>
+                        ) : (
+                          <small style={{ color: "var(--muted)" }}>Snapshot logged</small>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+// ============================================================================
+// 13. Unified Super Admin CMS Hub Component (Tabbed Architecture)
 // ============================================================================
 
 export function UnifiedCmsManager({
@@ -1901,6 +2333,10 @@ export function UnifiedCmsManager({
   industries,
   techStack,
   faqs,
+  media = [],
+  menus = [],
+  menuItems = [],
+  revisions = [],
 }: {
   pages: CmsPageRecord[];
   services: CmsServiceRecord[];
@@ -1914,9 +2350,26 @@ export function UnifiedCmsManager({
   industries: CmsIndustryRecord[];
   techStack: CmsTechStackRecord[];
   faqs: CmsFaqRecord[];
+  media?: CmsMediaRecord[];
+  menus?: CmsMenuRecord[];
+  menuItems?: CmsMenuItemRecord[];
+  revisions?: CmsRevisionRecord[];
 }) {
   const [activeTab, setActiveTab] = useState<
-    "hero" | "capabilities" | "services" | "process" | "industries" | "portfolio" | "tech" | "faqs" | "pages" | "blog" | "settings"
+    | "hero"
+    | "capabilities"
+    | "services"
+    | "process"
+    | "industries"
+    | "portfolio"
+    | "tech"
+    | "faqs"
+    | "pages"
+    | "blog"
+    | "media"
+    | "navigation"
+    | "revisions"
+    | "settings"
   >("hero");
 
   return (
@@ -1994,6 +2447,27 @@ export function UnifiedCmsManager({
           Blog ({posts.length})
         </button>
         <button
+          className={`button button-small ${activeTab === "media" ? "button-gold" : "button-secondary"}`}
+          onClick={() => setActiveTab("media")}
+          type="button"
+        >
+          Media ({media.length})
+        </button>
+        <button
+          className={`button button-small ${activeTab === "navigation" ? "button-gold" : "button-secondary"}`}
+          onClick={() => setActiveTab("navigation")}
+          type="button"
+        >
+          Navigation ({menuItems.length})
+        </button>
+        <button
+          className={`button button-small ${activeTab === "revisions" ? "button-gold" : "button-secondary"}`}
+          onClick={() => setActiveTab("revisions")}
+          type="button"
+        >
+          Revisions ({revisions.length})
+        </button>
+        <button
           className={`button button-small ${activeTab === "settings" ? "button-gold" : "button-secondary"}`}
           onClick={() => setActiveTab("settings")}
           type="button"
@@ -2013,7 +2487,11 @@ export function UnifiedCmsManager({
       {activeTab === "faqs" && <CmsFaqManager faqs={faqs} />}
       {activeTab === "pages" && <CmsPagesManager pages={pages} />}
       {activeTab === "blog" && <CmsBlogManager posts={posts} />}
+      {activeTab === "media" && <CmsMediaManager media={media} />}
+      {activeTab === "navigation" && <CmsNavigationManager menus={menus} menuItems={menuItems} />}
+      {activeTab === "revisions" && <CmsRevisionsManager revisions={revisions} />}
       {activeTab === "settings" && <CmsSiteSettingsManager settings={settings} />}
     </div>
   );
 }
+
