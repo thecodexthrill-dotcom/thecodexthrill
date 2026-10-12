@@ -1,10 +1,13 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import {
+  buildRetainedOrganizationAuditEventTombstone,
   classifyOrganizationDeleteDatabaseError,
   evaluateOrganizationDeletionEligibility,
   isLikelyTestOrganizationName,
+  ORGANIZATION_AUDIT_RETENTION_POLICY,
   validateOrganizationDeleteConfirmation,
+  type OrganizationAuditRetentionPolicy,
   type OrganizationDeletionEligibility,
   type OrganizationDependencyCounts,
   type OrganizationDirectoryItem,
@@ -12,10 +15,13 @@ import {
 } from "./organization-lifecycle-helper";
 
 export {
+  buildRetainedOrganizationAuditEventTombstone,
   classifyOrganizationDeleteDatabaseError,
   evaluateOrganizationDeletionEligibility,
   isLikelyTestOrganizationName,
+  ORGANIZATION_AUDIT_RETENTION_POLICY,
   validateOrganizationDeleteConfirmation,
+  type OrganizationAuditRetentionPolicy,
   type OrganizationDeletionEligibility,
   type OrganizationDependencyCounts,
   type OrganizationDirectoryItem,
@@ -151,6 +157,29 @@ export async function loadOrganizationDirectorySummaries(
   });
 }
 
+type OrganizationAuditEventSnapshot = {
+  id: string;
+  organization_id: string | null;
+  scope: string;
+  details: Record<string, unknown> | null;
+};
+
+async function rollbackDetachedOrganizationAuditEvents(
+  admin: ReturnType<typeof createAdminClient>,
+  snapshots: OrganizationAuditEventSnapshot[],
+): Promise<void> {
+  for (const snap of snapshots) {
+    await admin
+      .from("audit_events")
+      .update({
+        organization_id: snap.organization_id,
+        scope: snap.scope,
+        details: snap.details ?? {},
+      })
+      .eq("id", snap.id);
+  }
+}
+
 export async function permanentlyDeleteOrganization(params: {
   actorUserId: string;
   actorRoles: string[];
@@ -158,7 +187,13 @@ export async function permanentlyDeleteOrganization(params: {
   organizationId: string;
   confirmationName: string;
   typedConfirmation: string;
-}): Promise<{ ok: boolean; error?: string; message?: string; deletedOrganizationId?: string }> {
+}): Promise<{
+  ok: boolean;
+  error?: string;
+  message?: string;
+  deletedOrganizationId?: string;
+  retainedAuditEventsCount?: number;
+}> {
   if (!params.actorRoles.includes("super_admin")) {
     return {
       ok: false,
@@ -211,8 +246,55 @@ export async function permanentlyDeleteOrganization(params: {
       ok: false,
       error:
         summary?.eligibility.recommendation ??
-        "Permanent deletion is blocked because dependent records exist. Archive or suspend this organization instead.",
+        "Permanent deletion is prohibited because active operational or membership records exist. Archive or suspend this organization instead.",
     };
+  }
+
+  // Snapshot and tombstone-detach any organization-scoped audit_events rows so historical evidence
+  // is preserved in public.audit_events (scope='platform', organization_id=null) without violating
+  // audit_events_organization_id_fkey (ON DELETE RESTRICT).
+  const { data: orgAuditRows, error: auditQueryError } = await admin
+    .from("audit_events")
+    .select("id, organization_id, scope, details")
+    .eq("organization_id", org.id);
+
+  if (auditQueryError) {
+    return {
+      ok: false,
+      error: "Could not inspect organization audit history prior to deletion. No records were modified.",
+    };
+  }
+
+  const auditSnapshots = (orgAuditRows ?? []) as OrganizationAuditEventSnapshot[];
+  const detachedSnapshots: OrganizationAuditEventSnapshot[] = [];
+  const detachedAtIso = new Date().toISOString();
+
+  for (const snap of auditSnapshots) {
+    const tombstone = buildRetainedOrganizationAuditEventTombstone({
+      existingDetails: snap.details,
+      organizationId: org.id,
+      organizationName: org.name,
+      originalScope: snap.scope,
+      actorUserId: params.actorUserId,
+      detachedAtIso,
+    });
+
+    const { error: detachError } = await admin
+      .from("audit_events")
+      .update(tombstone)
+      .eq("id", snap.id)
+      .eq("organization_id", org.id);
+
+    if (detachError) {
+      await rollbackDetachedOrganizationAuditEvents(admin, detachedSnapshots);
+      return {
+        ok: false,
+        error:
+          "Could not transition organization audit history to platform tombstone retention. All audit records were restored and the organization was not deleted.",
+      };
+    }
+
+    detachedSnapshots.push(snap);
   }
 
   const { error: deleteError } = await admin
@@ -221,6 +303,9 @@ export async function permanentlyDeleteOrganization(params: {
     .eq("id", org.id);
 
   if (deleteError) {
+    if (detachedSnapshots.length > 0) {
+      await rollbackDetachedOrganizationAuditEvents(admin, detachedSnapshots);
+    }
     return {
       ok: false,
       error: classifyOrganizationDeleteDatabaseError(deleteError, org.name),
@@ -238,13 +323,24 @@ export async function permanentlyDeleteOrganization(params: {
       previous_status: org.status,
       created_at: org.created_at,
       dependencies_verified_zero: summary.dependencies,
+      audit_retention_policy:
+        detachedSnapshots.length > 0 ? ORGANIZATION_AUDIT_RETENTION_POLICY : "none",
+      retained_audit_events_count: detachedSnapshots.length,
+      retained_audit_event_ids: detachedSnapshots.map((s) => s.id),
     },
   });
+
+  const retentionSummary =
+    detachedSnapshots.length > 0
+      ? ` ${detachedSnapshots.length} historical audit event${detachedSnapshots.length === 1 ? " was" : "s were"} preserved in the platform audit log with organization tombstone metadata.`
+      : "";
 
   return {
     ok: true,
     deletedOrganizationId: org.id,
-    message: `Organization "${org.name}" was permanently deleted and recorded in the immutable audit log.`,
+    retainedAuditEventsCount: detachedSnapshots.length,
+    message: `Organization "${org.name}" was permanently deleted and recorded in the immutable audit log.${retentionSummary}`,
   };
 }
+
 

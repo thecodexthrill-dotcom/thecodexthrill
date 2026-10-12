@@ -91,9 +91,11 @@ test("Invitation email error classification handles unconfigured SMTP safely", (
 });
 
 import {
+  buildRetainedOrganizationAuditEventTombstone,
   classifyOrganizationDeleteDatabaseError,
   evaluateOrganizationDeletionEligibility,
   isLikelyTestOrganizationName,
+  ORGANIZATION_AUDIT_RETENTION_POLICY,
   validateOrganizationDeleteConfirmation,
 } from "./organization-lifecycle-helper.ts";
 
@@ -111,6 +113,8 @@ test("Organization deletion eligibility blocks real client organizations with de
   });
   assert.equal(emptyEligibility.canPermanentlyDelete, true);
   assert.equal(emptyEligibility.totalBlockingRecords, 0);
+  assert.equal(emptyEligibility.retainedAuditEventsCount, 0);
+  assert.equal(emptyEligibility.auditRetentionPolicy, "none");
   assert.equal(emptyEligibility.blockers.length, 0);
 
   const clientWithRecords = evaluateOrganizationDeletionEligibility({
@@ -125,19 +129,17 @@ test("Organization deletion eligibility blocks real client organizations with de
     auditEventsCount: 6,
   });
   assert.equal(clientWithRecords.canPermanentlyDelete, false);
-  assert.equal(clientWithRecords.totalBlockingRecords, 11);
-  assert.deepEqual(clientWithRecords.blockers, [
-    "4 documents",
-    "1 invoice",
-    "6 retained audit events",
-  ]);
+  assert.equal(clientWithRecords.totalBlockingRecords, 5);
+  assert.equal(clientWithRecords.retainedAuditEventsCount, 6);
+  assert.deepEqual(clientWithRecords.blockers, ["4 documents", "1 invoice"]);
   assert.match(clientWithRecords.recommendation, /Archive or Suspend/i);
 });
 
-test("Regression 23503: organization with 0 active operational rows but retained organization audit_events is blocked from permanent deletion", () => {
+test("Regression 23503: organization with 0 operational rows and retained audit_events is eligible for permanent deletion via platform tombstone retention", () => {
   // Reproduces Automation Org MV3B9DKK (14fff560-9d27-427c-b0b2-22b35212c883):
-  // 0 projects, tasks, documents, invoices, tickets, and memberships, but 8 rows in public.audit_events
-  // referencing public.organizations(id) via audit_events_organization_id_fkey (ON DELETE RESTRICT).
+  // 0 projects, tasks, documents, invoices, tickets, and memberships, with 8 historical rows in
+  // public.audit_events that are preserved as platform-scoped tombstones (organization_id = null,
+  // scope = 'platform') prior to deleting the organization row.
   const retainedAuditOnly = evaluateOrganizationDeletionEligibility({
     projectsCount: 0,
     tasksCount: 0,
@@ -149,11 +151,33 @@ test("Regression 23503: organization with 0 active operational rows but retained
     roleAssignmentsCount: 0,
     auditEventsCount: 8,
   });
-  assert.equal(retainedAuditOnly.canPermanentlyDelete, false);
-  assert.equal(retainedAuditOnly.totalBlockingRecords, 8);
-  assert.deepEqual(retainedAuditOnly.blockers, ["8 retained audit events"]);
-  assert.match(retainedAuditOnly.recommendation, /ON DELETE RESTRICT/i);
-  assert.match(retainedAuditOnly.recommendation, /Archive or Suspend/i);
+  assert.equal(retainedAuditOnly.canPermanentlyDelete, true);
+  assert.equal(retainedAuditOnly.totalBlockingRecords, 0);
+  assert.equal(retainedAuditOnly.retainedAuditEventsCount, 8);
+  assert.equal(retainedAuditOnly.auditRetentionPolicy, ORGANIZATION_AUDIT_RETENTION_POLICY);
+  assert.deepEqual(retainedAuditOnly.blockers, []);
+  assert.match(retainedAuditOnly.recommendation, /preserved in public\.audit_events as platform-scoped tombstones/i);
+
+  const tombstone = buildRetainedOrganizationAuditEventTombstone({
+    existingDetails: { operation: "delete", status: "planning" },
+    organizationId: "14fff560-9d27-427c-b0b2-22b35212c883",
+    organizationName: "Automation Org MV3B9DKK",
+    originalScope: "organization",
+    actorUserId: "d57b6659-5679-4d40-a2fb-cf27e972ce25",
+    detachedAtIso: "2026-10-12T05:30:00.000Z",
+  });
+  assert.equal(tombstone.organization_id, null);
+  assert.equal(tombstone.scope, "platform");
+  assert.equal(tombstone.details.operation, "delete");
+  assert.equal(tombstone.details.status, "planning");
+  assert.deepEqual(tombstone.details.retained_organization_context, {
+    deleted_organization_id: "14fff560-9d27-427c-b0b2-22b35212c883",
+    deleted_organization_name: "Automation Org MV3B9DKK",
+    original_scope: "organization",
+    retention_policy: "preserve_as_platform_tombstone",
+    detached_at: "2026-10-12T05:30:00.000Z",
+    detached_by_user_id: "d57b6659-5679-4d40-a2fb-cf27e972ce25",
+  });
 
   const fkErrorMessage = classifyOrganizationDeleteDatabaseError(
     {
@@ -165,7 +189,6 @@ test("Regression 23503: organization with 0 active operational rows but retained
     "Automation Org MV3B9DKK",
   );
   assert.match(fkErrorMessage, /audit_events_organization_id_fkey \(23503\)/);
-  assert.match(fkErrorMessage, /Archive or Suspend/i);
 });
 
 test("Organization permanent delete requires exact two-step name and DELETE phrase confirmation", () => {

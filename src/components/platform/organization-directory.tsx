@@ -214,12 +214,12 @@ export function OrganizationDirectory({
         <div className="um-summary-card">
           <span>Protected Client Records</span>
           <strong>{counts.withRecords}</strong>
-          <small>Protected from deletion by projects, invoices, files, members, or retained audit history</small>
+          <small>Protected from deletion by projects, tasks, files, invoices, tickets, or memberships</small>
         </div>
         <div className="um-summary-card">
           <span>Empty / Deletable</span>
           <strong>{counts.emptyDeletable}</strong>
-          <small>Zero projects, invoices, files, tickets, memberships, or organization audit events</small>
+          <small>Zero projects, invoices, files, tickets, or memberships (audit history preserved on delete)</small>
         </div>
       </div>
 
@@ -316,47 +316,59 @@ export function OrganizationDirectory({
                     </td>
                     <td>
                       {org.eligibility.canPermanentlyDelete ? (
-                        <span className="um-badge um-badge-muted">0 linked records</span>
-                      ) : (
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
-                          {deps.projectsCount > 0 && (
-                            <span className="um-badge um-badge-gold">
-                              {deps.projectsCount} Project{deps.projectsCount === 1 ? "" : "s"}
-                            </span>
-                          )}
-                          {deps.tasksCount > 0 && (
-                            <span className="um-badge um-badge-muted">
-                              {deps.tasksCount} Task{deps.tasksCount === 1 ? "" : "s"}
-                            </span>
-                          )}
-                          {deps.documentsCount > 0 && (
-                            <span className="um-badge um-badge-gold">
-                              {deps.documentsCount} File{deps.documentsCount === 1 ? "" : "s"}
-                            </span>
-                          )}
-                          {deps.invoicesCount > 0 && (
-                            <span className="um-badge um-badge-green">
-                              {deps.invoicesCount} Invoice{deps.invoicesCount === 1 ? "" : "s"}
-                            </span>
-                          )}
-                          {deps.supportTicketsCount > 0 && (
-                            <span className="um-badge um-badge-amber">
-                              {deps.supportTicketsCount} Ticket{deps.supportTicketsCount === 1 ? "" : "s"}
-                            </span>
-                          )}
-                          {deps.totalMembershipsCount > 0 && (
-                            <span className="um-badge um-badge-green">
-                              {deps.activeMembershipsCount}/{deps.totalMembershipsCount} Member{deps.totalMembershipsCount === 1 ? "" : "s"}
-                            </span>
-                          )}
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", alignItems: "center" }}>
+                          <span className="um-badge um-badge-muted">0 operational records</span>
                           {(deps.auditEventsCount ?? 0) > 0 && (
                             <span
-                              className="um-badge um-badge-muted"
-                              title="Retained organization-scoped audit history in public.audit_events (audit_events_organization_id_fkey ON DELETE RESTRICT)"
+                              className="um-badge um-badge-gold"
+                              title="Historical audit events in public.audit_events will be preserved as platform-scoped tombstones upon organization deletion"
                             >
-                              {deps.auditEventsCount} Audit Event{deps.auditEventsCount === 1 ? "" : "s"}
+                              {deps.auditEventsCount} Audit Event{deps.auditEventsCount === 1 ? "" : "s"} (Preserved on Delete)
                             </span>
                           )}
+                        </div>
+                      ) : (
+                        <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+                            {deps.projectsCount > 0 && (
+                              <span className="um-badge um-badge-gold">
+                                {deps.projectsCount} Project{deps.projectsCount === 1 ? "" : "s"}
+                              </span>
+                            )}
+                            {deps.tasksCount > 0 && (
+                              <span className="um-badge um-badge-muted">
+                                {deps.tasksCount} Task{deps.tasksCount === 1 ? "" : "s"}
+                              </span>
+                            )}
+                            {deps.documentsCount > 0 && (
+                              <span className="um-badge um-badge-gold">
+                                {deps.documentsCount} File{deps.documentsCount === 1 ? "" : "s"}
+                              </span>
+                            )}
+                            {deps.invoicesCount > 0 && (
+                              <span className="um-badge um-badge-green">
+                                {deps.invoicesCount} Invoice{deps.invoicesCount === 1 ? "" : "s"}
+                              </span>
+                            )}
+                            {deps.supportTicketsCount > 0 && (
+                              <span className="um-badge um-badge-amber">
+                                {deps.supportTicketsCount} Ticket{deps.supportTicketsCount === 1 ? "" : "s"}
+                              </span>
+                            )}
+                            {deps.totalMembershipsCount > 0 && (
+                              <span className="um-badge um-badge-green">
+                                {deps.activeMembershipsCount}/{deps.totalMembershipsCount} Member{deps.totalMembershipsCount === 1 ? "" : "s"}
+                              </span>
+                            )}
+                            {(deps.auditEventsCount ?? 0) > 0 && (
+                              <span className="um-badge um-badge-muted">
+                                {deps.auditEventsCount} Audit Event{deps.auditEventsCount === 1 ? "" : "s"}
+                              </span>
+                            )}
+                          </div>
+                          <small style={{ color: "var(--subtle)", fontSize: "11px" }}>
+                            Delete prohibited: retains {org.eligibility.blockers.join(", ")}
+                          </small>
                         </div>
                       )}
                     </td>
@@ -403,21 +415,37 @@ export function OrganizationDirectory({
                             </button>
                           </form>
                         )}
-                        {isSuperAdmin && (
-                          <button
-                            className="button button-small button-danger"
-                            onClick={() => openDeleteModal(org)}
-                            title={
-                              org.eligibility.canPermanentlyDelete
-                                ? "Permanently delete this empty organization"
-                                : "Inspect why permanent deletion is blocked for this organization"
-                            }
-                            type="button"
-                          >
-                            <Trash2 aria-hidden="true" size={13} />{" "}
-                            {org.eligibility.canPermanentlyDelete ? "Permanent Delete" : "Protected"}
-                          </button>
-                        )}
+                        {isSuperAdmin &&
+                          (org.eligibility.canPermanentlyDelete ? (
+                            <button
+                              className="button button-small button-danger"
+                              onClick={() => openDeleteModal(org)}
+                              title={org.eligibility.recommendation}
+                              type="button"
+                            >
+                              <Trash2 aria-hidden="true" size={13} /> Permanent Delete
+                            </button>
+                          ) : (
+                            <>
+                              <button
+                                aria-disabled="true"
+                                className="button button-small button-secondary"
+                                disabled
+                                title={org.eligibility.recommendation}
+                                type="button"
+                              >
+                                <Trash2 aria-hidden="true" size={13} /> Delete Prohibited
+                              </button>
+                              <button
+                                className="button button-small button-secondary"
+                                onClick={() => openDeleteModal(org)}
+                                title={org.eligibility.recommendation}
+                                type="button"
+                              >
+                                <ShieldAlert aria-hidden="true" size={13} /> Why Prohibited
+                              </button>
+                            </>
+                          ))}
                       </div>
 
                       {isEditing && (
@@ -467,10 +495,12 @@ export function OrganizationDirectory({
       )}
 
       <p className="module-note" style={{ marginTop: "14px" }}>
-        Organizations with projects, tasks, documents, invoices, support tickets, memberships, or
-        retained organization audit history (<code>public.audit_events.organization_id</code>) are
-        protected from permanent deletion; use <strong>Archive</strong> or{" "}
-        <strong>Suspend</strong> to deactivate access while preserving historical records.
+        Organizations with active projects, tasks, documents, invoices, support tickets, or
+        memberships are prohibited from permanent deletion; use <strong>Archive</strong> or{" "}
+        <strong>Suspend</strong> for those accounts. When an organization with 0 operational
+        records is permanently deleted, any historical rows in <code>public.audit_events</code> are
+        automatically preserved as platform-scoped tombstones (<code>scope = &apos;platform&apos;</code>,{" "}
+        <code>organization_id = NULL</code>).
       </p>
 
       {activeDeleteTarget && (
@@ -491,8 +521,8 @@ export function OrganizationDirectory({
                   </p>
                   <h3 id="org-delete-modal-title" style={{ margin: "2px 0 0" }}>
                     {activeDeleteTarget.eligibility.canPermanentlyDelete
-                      ? "Permanently Delete Empty Organization"
-                      : "Permanent Deletion Blocked — Active Dependencies"}
+                      ? "Permanently Delete Organization"
+                      : "Permanent Deletion Prohibited — Active Dependencies"}
                   </h3>
                 </div>
               </div>
@@ -530,13 +560,13 @@ export function OrganizationDirectory({
                     <div style={{ display: "flex", alignItems: "flex-start", gap: "10px" }}>
                       <ShieldAlert aria-hidden="true" size={18} style={{ flexShrink: 0, marginTop: "2px" }} />
                       <div>
-                        <strong>Cannot permanently delete this organization</strong>
+                        <strong>Permanent deletion is prohibited for this organization</strong>
                         <p style={{ margin: "4px 0 0" }}>{activeDeleteTarget.eligibility.recommendation}</p>
                       </div>
                     </div>
                   </div>
                   <p style={{ fontSize: "13px", color: "var(--muted)", marginBottom: "12px" }}>
-                    Blocking dependencies detected in Supabase Cloud:
+                    Blocking operational dependencies detected in Supabase Cloud:
                   </p>
                   <ul style={{ margin: "0 0 16px", paddingLeft: "20px", fontSize: "13px", lineHeight: "1.7" }}>
                     {activeDeleteTarget.eligibility.blockers.map((blocker) => (
@@ -588,9 +618,23 @@ export function OrganizationDirectory({
                       <AlertTriangle aria-hidden="true" size={16} /> Irreversible Super Admin Action
                     </div>
                     <p style={{ margin: "6px 0 0", color: "var(--muted)" }}>
-                      This organization has <strong>0 projects, 0 tasks, 0 documents, 0 invoices, 0 tickets, 0 memberships, and 0 organization audit events</strong>.
+                      This organization has <strong>0 projects, 0 tasks, 0 documents, 0 invoices, 0 tickets, and 0 memberships</strong>.
                       Deleting it permanently removes the row from <code>public.organizations</code> and writes an immutable platform record to <code>audit_events</code>.
                     </p>
+                    {(activeDeleteTarget.dependencies.auditEventsCount ?? 0) > 0 && (
+                      <p style={{ margin: "8px 0 0", color: "var(--foreground)" }}>
+                        <strong>Audit History Retention Policy:</strong> This organization has{" "}
+                        <strong>
+                          {activeDeleteTarget.dependencies.auditEventsCount} historical audit event
+                          {activeDeleteTarget.dependencies.auditEventsCount === 1 ? "" : "s"}
+                        </strong>{" "}
+                        in <code>public.audit_events</code>. All {activeDeleteTarget.dependencies.auditEventsCount} record
+                        {activeDeleteTarget.dependencies.auditEventsCount === 1 ? "" : "s"} will be preserved as
+                        platform-scoped tombstones (<code>scope = &apos;platform&apos;</code>,{" "}
+                        <code>organization_id = NULL</code>, <code>details.retained_organization_context</code>) prior
+                        to deleting the organization row.
+                      </p>
+                    )}
                   </div>
 
                   <label>

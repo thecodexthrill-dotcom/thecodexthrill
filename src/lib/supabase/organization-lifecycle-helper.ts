@@ -12,9 +12,18 @@ export type OrganizationDependencyCounts = {
   auditEventsCount?: number;
 };
 
+export const ORGANIZATION_AUDIT_RETENTION_POLICY =
+  "preserve_as_platform_tombstone" as const;
+
+export type OrganizationAuditRetentionPolicy =
+  | typeof ORGANIZATION_AUDIT_RETENTION_POLICY
+  | "none";
+
 export type OrganizationDeletionEligibility = {
   canPermanentlyDelete: boolean;
   totalBlockingRecords: number;
+  retainedAuditEventsCount: number;
+  auditRetentionPolicy: OrganizationAuditRetentionPolicy;
   blockers: string[];
   recommendation: string;
 };
@@ -48,7 +57,7 @@ export function evaluateOrganizationDeletionEligibility(
   deps: OrganizationDependencyCounts,
 ): OrganizationDeletionEligibility {
   const blockers: string[] = [];
-  const auditEventsCount = deps.auditEventsCount ?? 0;
+  const retainedAuditEventsCount = deps.auditEventsCount ?? 0;
 
   if (deps.projectsCount > 0) {
     blockers.push(`${deps.projectsCount} project${deps.projectsCount === 1 ? "" : "s"}`);
@@ -81,11 +90,6 @@ export function evaluateOrganizationDeletionEligibility(
       `${deps.roleAssignmentsCount} role assignment${deps.roleAssignmentsCount === 1 ? "" : "s"}`,
     );
   }
-  if (auditEventsCount > 0) {
-    blockers.push(
-      `${auditEventsCount} retained audit event${auditEventsCount === 1 ? "" : "s"}`,
-    );
-  }
 
   const totalBlockingRecords =
     deps.projectsCount +
@@ -94,20 +98,65 @@ export function evaluateOrganizationDeletionEligibility(
     deps.invoicesCount +
     deps.supportTicketsCount +
     deps.totalMembershipsCount +
-    deps.roleAssignmentsCount +
-    auditEventsCount;
+    deps.roleAssignmentsCount;
 
   const canPermanentlyDelete = blockers.length === 0 && totalBlockingRecords === 0;
+  const auditRetentionPolicy: OrganizationAuditRetentionPolicy =
+    retainedAuditEventsCount > 0 ? ORGANIZATION_AUDIT_RETENTION_POLICY : "none";
 
-  const recommendation = canPermanentlyDelete
-    ? "Safe to permanently delete (0 projects, tasks, documents, invoices, tickets, memberships, or organization audit events)."
-    : `Permanent deletion blocked because this organization retains ${blockers.join(", ")}. Immutable audit history and operational records are protected by ON DELETE RESTRICT. Use Archive or Suspend to deactivate access while preserving historical records.`;
+  let recommendation: string;
+  if (!canPermanentlyDelete) {
+    recommendation = `Permanent deletion is prohibited because this organization retains ${blockers.join(", ")}. Active client delivery, financial, support, and membership records are protected by ON DELETE RESTRICT. Use Archive or Suspend to deactivate access while preserving historical records.`;
+  } else if (retainedAuditEventsCount > 0) {
+    recommendation = `Eligible for permanent deletion (0 projects, tasks, documents, invoices, tickets, or memberships). ${retainedAuditEventsCount} historical audit event${retainedAuditEventsCount === 1 ? "" : "s"} will be preserved in public.audit_events as platform-scoped tombstones (organization_id = NULL, scope = 'platform') before deleting the organization.`;
+  } else {
+    recommendation =
+      "Safe to permanently delete (0 projects, tasks, documents, invoices, tickets, memberships, or organization audit events).";
+  }
 
   return {
     canPermanentlyDelete,
     totalBlockingRecords,
+    retainedAuditEventsCount,
+    auditRetentionPolicy,
     blockers,
     recommendation,
+  };
+}
+
+export function buildRetainedOrganizationAuditEventTombstone(params: {
+  existingDetails: Record<string, unknown> | null | undefined;
+  organizationId: string;
+  organizationName: string;
+  originalScope?: string | null;
+  actorUserId: string;
+  detachedAtIso: string;
+}): {
+  organization_id: null;
+  scope: "platform";
+  details: Record<string, unknown>;
+} {
+  const baseDetails =
+    params.existingDetails &&
+    typeof params.existingDetails === "object" &&
+    !Array.isArray(params.existingDetails)
+      ? params.existingDetails
+      : {};
+
+  return {
+    organization_id: null,
+    scope: "platform",
+    details: {
+      ...baseDetails,
+      retained_organization_context: {
+        deleted_organization_id: params.organizationId,
+        deleted_organization_name: params.organizationName,
+        original_scope: params.originalScope ?? "organization",
+        retention_policy: ORGANIZATION_AUDIT_RETENTION_POLICY,
+        detached_at: params.detachedAtIso,
+        detached_by_user_id: params.actorUserId,
+      },
+    },
   };
 }
 
@@ -120,12 +169,12 @@ export function classifyOrganizationDeleteDatabaseError(
 
   if (code === "23503") {
     if (combined.includes("audit_events")) {
-      return `Permanent deletion of "${organizationName}" is blocked by foreign-key constraint audit_events_organization_id_fkey (23503) because immutable organization audit events reference this organization. Use Archive or Suspend instead.`;
+      return `Permanent deletion of "${organizationName}" was rejected by foreign-key constraint audit_events_organization_id_fkey (23503) because organization audit events could not be detached to platform tombstone retention.`;
     }
-    return `Permanent deletion of "${organizationName}" is blocked by PostgreSQL foreign-key constraint (23503) because retained records still reference this organization. Use Archive or Suspend instead.`;
+    return `Permanent deletion of "${organizationName}" is blocked by PostgreSQL foreign-key constraint (23503) because concurrent operational or membership records still reference this organization.`;
   }
 
-  return `Supabase rejected organization deletion (${code}). Use Archive or Suspend instead.`;
+  return `Supabase rejected organization deletion (${code}). Verify that no dependent operational records exist and retry.`;
 }
 
 export function validateOrganizationDeleteConfirmation(params: {
