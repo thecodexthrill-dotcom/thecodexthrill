@@ -1,5 +1,16 @@
 import type { NextConfig } from "next";
 
+const noStoreProtectedHeaders = [
+  {
+    key: "Cache-Control",
+    value: "private, no-cache, no-store, max-age=0, must-revalidate",
+  },
+  {
+    key: "Pragma",
+    value: "no-cache",
+  },
+];
+
 const nextConfig: NextConfig = {
   poweredByHeader: false,
   async redirects() {
@@ -43,10 +54,67 @@ const nextConfig: NextConfig = {
             value: "no-cache, no-store, must-revalidate",
           },
           {
+            key: "Service-Worker-Allowed",
+            value: "/",
+          },
+          {
             key: "Content-Security-Policy",
             value: "default-src 'self'; script-src 'self'",
           },
         ],
+      },
+      {
+        source: "/offline.html",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=0, must-revalidate",
+          },
+        ],
+      },
+      {
+        source: "/admin/:path*",
+        headers: noStoreProtectedHeaders,
+      },
+      {
+        source: "/portal/:path*",
+        headers: noStoreProtectedHeaders,
+      },
+      {
+        source: "/account/:path*",
+        headers: noStoreProtectedHeaders,
+      },
+      {
+        source: "/mfa",
+        headers: noStoreProtectedHeaders,
+      },
+      {
+        source: "/auth/:path*",
+        headers: noStoreProtectedHeaders,
+      },
+      {
+        source: "/invite/:path*",
+        headers: noStoreProtectedHeaders,
+      },
+      {
+        source: "/bootstrap/:path*",
+        headers: noStoreProtectedHeaders,
+      },
+      {
+        source: "/api/:path*",
+        headers: noStoreProtectedHeaders,
+      },
+      {
+        source: "/login",
+        headers: noStoreProtectedHeaders,
+      },
+      {
+        source: "/forgot-password",
+        headers: noStoreProtectedHeaders,
+      },
+      {
+        source: "/reset-password",
+        headers: noStoreProtectedHeaders,
       },
     ];
   },

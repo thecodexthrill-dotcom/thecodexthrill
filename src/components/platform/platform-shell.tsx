@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 
 import { ThemeToggle } from "@/components/site/theme-toggle";
+import { purgeSensitiveClientStateAndCaches } from "@/lib/pwa/pwa-cache-policy";
 import { signOutAction } from "@/lib/supabase/actions";
 
 type PlatformRole = "super_admin" | "platform_admin" | "developer" | "support_staff";
@@ -190,7 +191,7 @@ export function PlatformShell({
                 )}
               </Link>
             )}
-            <details className="profile-menu"><summary><span className="profile-avatar">{userEmail.slice(0, 1).toUpperCase()}</span><span className="profile-label"><strong>{userEmail}</strong><small>{primaryRole ? roleLabel(primaryRole) : "Account"}</small></span><ChevronDown aria-hidden="true" size={15} /></summary><div className="profile-dropdown"><p>{roles.map(roleLabel).join(", ")}</p><Link href="/">Visit public site</Link><form action={signOutAction}><button className="profile-signout" type="submit">Sign out</button></form></div></details>
+            <details className="profile-menu"><summary><span className="profile-avatar">{userEmail.slice(0, 1).toUpperCase()}</span><span className="profile-label"><strong>{userEmail}</strong><small>{primaryRole ? roleLabel(primaryRole) : "Account"}</small></span><ChevronDown aria-hidden="true" size={15} /></summary><div className="profile-dropdown"><p>{roles.map(roleLabel).join(", ")}</p><Link href="/">Visit public site</Link><form action={signOutAction} onSubmit={() => { void purgeSensitiveClientStateAndCaches({ reason: "logout", clearSupabaseLocalStorage: true }); }}><button className="profile-signout" type="submit">Sign out</button></form></div></details>
           </div>
         </header>
         <main className="platform-page" id="main-content">
