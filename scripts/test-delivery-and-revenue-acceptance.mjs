@@ -372,6 +372,7 @@ async function runAcceptance() {
       await adminClient.from("tenant_projects").delete().eq("id", projectId);
     }
     if (orgId) {
+      await adminClient.from("audit_events").delete().eq("organization_id", orgId);
       await adminClient.from("organizations").delete().eq("id", orgId);
     }
     console.log("[CLEANUP] Test organization, project, tasks, deliverable, invoice, and ticket removed.");

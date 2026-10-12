@@ -44,28 +44,28 @@ Public Auth signup is disabled to preserve the invitation-only policy. Verify Cl
 
 The Next.js app may run locally while using only the approved Supabase Cloud project. Keep .env.local pointed at that project. The backend target remains Cloud in every environment.
 
-## Scheduled workflow automation (`/api/internal/workflows/run`)
+## Scheduled workflow automation (`/api/automation/run`)
 
-Background operational sweeps (overdue invoice escalation, stale support ticket alerts,overdue task reminders, and notification retry queues) execute via `/api/internal/workflows/run`:
+Background operational sweeps (overdue invoice escalation, stale support ticket alerts, overdue task reminders, lead follow-up reminders, and invitation expiry checks) execute via `GET` or `POST /api/automation/run`:
 
-- **Authentication:** Accepts either a valid `Authorization: Bearer <CRON_SECRET>` header (for Vercel Cron or external schedulers) or an authenticated interactive session from a platform staff member with `operations.manage`.
-- **Idempotency:** Each workflow rule computes a deterministic `idempotency_key` per target entity and time window in `public.workflow_runs` to prevent duplicate notifications on repeated triggers.
-- **Retry behavior:** Failed or queued deliveries in `public.notification_deliveries` are retried up to `max_attempts` (default 3) with failure diagnostics recorded in `error_message`.
+- **Authentication:** Requires a valid `Authorization: Bearer <CRON_SECRET>` or `x-automation-secret` header (minimum 16 characters; legacy aliases `WORKFLOW_AUTOMATION_SECRET` and `AUTOMATION_CRON_SECRET` supported) verified via constant-time comparison in `verifySchedulerRequest`. Interactive sweeps can also be triggered by authorized platform staff (`runAutomationSweepAction`) from `/admin/notifications`.
+- **Idempotency & Deduplication:** Each workflow rule deduplicates notifications within its configured time window and records execution outcomes (`workflow.automation_completed` / `workflow.automation_failed`) in `public.audit_events`.
+- **Sanitized Logging & Failure Throttling:** Operational failures are sanitized (`logSanitizedOperationalEvent`) to redact secrets/PII and throttled to prevent audit table flooding.
 
 ## Production observability and health checks
 
-- **Health endpoint:** `GET /api/health` returns JSON status (`ok`, `timestamp`, `environment`, `checks`) with `Cache-Control: no-store`.
-- **Operational telemetry:** Super Admins and Platform Admins monitor delivery health, failed notification retries, and scheduled workflow execution history under `/admin/notifications` and `/admin/analytics`, and inspect immutable security events under `/admin/security`.
+- **Platform Integration & Automation Health:** Super Admins and Platform Admins inspect live integration status (`resolvePlatformIntegrationStatus`), automation sweep health (`computeAutomationJobHealth`), and operational telemetry under `/admin/notifications` and `/admin/analytics`, and review immutable security events under `/admin/security`.
+- **CSV Export Security:** Executive analytics CSV exports (`/api/admin/analytics/export`) enforce server-side RBAC, MFA AAL2 for privileged roles, and spreadsheet formula injection neutralization (`sanitizeCsvCell`).
 
 ## Database backup, retention, and restore runbook
 
 1. **Automated Cloud Backups:** Supabase Cloud (`isgoypmebtoipfvtaflg`) manages daily automated PostgreSQL snapshots and Point-in-Time Recovery (PITR). Verify backup status in the Supabase Dashboard under **Database -> Backups**.
 2. **Audit & Financial Retention Invariants:**
    - `public.audit_events` rows are append-only and protected against mutation or deletion by triggers.
-   - Deleting an organization uses the audited tombstone flow (`preserve_as_platform_tombstone`): `audit_events.organization_id` is detached to `NULL` while preserving `organization_id`, `organization_name`, and `organization_slug` inside `audit_events.metadata`, and organizations with invoices or active projects are blocked from permanent deletion until dependencies are resolved.
+   - Deleting an organization uses the audited tombstone flow (`preserve_as_platform_tombstone`): `audit_events.organization_id` is detached to `NULL` while preserving `organization_id`, `organization_name`, and `organization_slug` inside `audit_events.details`, and organizations with invoices or active projects are blocked from permanent deletion until dependencies are resolved.
 3. **Restore Verification Drill:**
    - Never restore directly over Production without explicit Owner authorization.
-   - To verify backup integrity, restore the snapshot to an isolated staging/branch project, run `npm run typecheck`, `npm test`, and verify row counts on `organizations`, `profiles`, `projects`, `invoices`, and `audit_events`.
+   - To verify backup integrity, restore the snapshot to an isolated staging/branch project, run `npm run typecheck`, `npm test`, and verify row counts on `organizations`, `profiles`, `tenant_projects`, `tenant_invoices`, and `audit_events`.
 
 ## Incident response and deployment rollback
 

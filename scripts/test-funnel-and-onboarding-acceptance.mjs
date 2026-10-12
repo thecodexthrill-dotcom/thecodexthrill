@@ -240,6 +240,7 @@ async function runFunnelAcceptanceTest() {
       await serviceClient.from("tenant_projects").delete().eq("id", testProjectId);
     }
     if (testOrgId) {
+      await serviceClient.from("audit_events").delete().eq("organization_id", testOrgId);
       await serviceClient.from("organizations").delete().eq("id", testOrgId);
     }
     if (testLeadId) {

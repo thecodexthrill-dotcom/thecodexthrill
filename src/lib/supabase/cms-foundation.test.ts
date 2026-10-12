@@ -150,3 +150,24 @@ test("CMS content richness expansion migration creates hero, capabilities, proce
   assert.match(richnessMigration, /insert into public\.cms_faqs/);
   assert.match(richnessMigration, /insert into public\.cms_tech_stack/);
 });
+
+test("CMS media, navigation menu, and revision restore actions align with PostgreSQL schema columns", () => {
+  const cmsActionsSource = readFileSync("src/lib/supabase/cms-actions.ts", "utf8");
+
+  // cms_media columns
+  assert.match(cmsActionsSource, /storage_path:/);
+  assert.match(cmsActionsSource, /public_url:/);
+  assert.match(cmsActionsSource, /file_size_bytes:/);
+
+  // cms_menus & cms_menu_items columns
+  assert.match(cmsActionsSource, /\.from\("cms_menus"\)/);
+  assert.match(cmsActionsSource, /onConflict:\s*"code"/);
+  assert.match(cmsActionsSource, /is_external:/);
+  assert.match(cmsActionsSource, /is_visible:/);
+
+  // cms_case_studies revision restore columns
+  assert.match(cmsActionsSource, /deliverables:\s*Array\.isArray\(snap\.deliverables\)/);
+  assert.match(cmsActionsSource, /results:\s*Array\.isArray\(snap\.results\)/);
+  assert.match(cmsActionsSource, /technologies:\s*Array\.isArray\(snap\.technologies\)/);
+});
+
