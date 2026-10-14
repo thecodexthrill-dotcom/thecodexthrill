@@ -125,10 +125,10 @@ export const portfolioProjects: PortfolioProject[] = [
     category: "Enterprise Software",
     industry: "Fintech & Investment Banking",
     summary: "Multi-tenant portfolio management and real-time reconciliation engine with strict Row-Level Security, sub-50ms query latency, and automated audit logging.",
-    description: "Apex Capital required a unified, high-integrity platform to replace legacy batch processing across global desks. We architected a zero-trust multi-tenant system using Next.js App Router and PostgreSQL Row-Level Security on Supabase Cloud, enforcing mandatory AAL2 MFA for high-value portfolio actions.",
+    description: "Apex Capital required a unified, high-integrity platform to replace legacy batch processing across global desks. We architected a zero-trust multi-tenant system using Next.js App Router and PostgreSQL Row-Level Security on enterprise cloud infrastructure, enforcing mandatory AAL2 MFA for high-value portfolio actions.",
     client: "Apex Global Assets",
     timeline: "16 weeks",
-    technologies: ["Next.js 16", "Supabase Cloud", "PostgreSQL RLS", "TypeScript", "Tailwind CSS"],
+    technologies: ["Next.js 16", "PostgreSQL RLS", "TypeScript", "Tailwind CSS", "Enterprise Cloud"],
     deliverables: ["Real-time transaction reconciliation pipeline", "Audited fund allocation ledger", "Multi-factor tenant access gateway", "Automated compliance export reports"],
     results: [
       "Sub-50ms reconciliation queries across 1.2M daily transactions",
@@ -145,7 +145,7 @@ export const portfolioProjects: PortfolioProject[] = [
     description: "Designed for a high-growth developer platform, OmniStream couples domain-specific AI models with rigorous human review gates. Customer tickets are categorized with confidence scores, relevant codebase documents are embedded dynamically, and staff can review or adjust suggested resolutions with one click.",
     client: "OmniStream Systems",
     timeline: "12 weeks",
-    technologies: ["Next.js", "Python FastMCP", "Vector Embeddings", "Supabase", "TypeScript"],
+    technologies: ["Next.js", "Python FastMCP", "Vector Embeddings", "PostgreSQL pgvector", "TypeScript"],
     deliverables: ["Context-aware incident classifier", "Human review escalation interface", "Streaming response generator with source links", "Drift and hallucination monitoring"],
     results: [
       "92% automated triage accuracy on unstructured technical issues",

@@ -101,7 +101,7 @@ export function HeroEditorial({
             </div>
             <div className="proof-strip-text">
               <strong>Zero-Downtime Releases</strong>
-              <span>Reversible declarative migrations verified against Supabase Cloud</span>
+              <span>Reversible declarative schema migrations &amp; audit trails</span>
             </div>
           </div>
         </div>

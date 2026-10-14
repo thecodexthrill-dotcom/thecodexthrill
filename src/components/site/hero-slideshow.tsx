@@ -1,29 +1,50 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { ChevronLeft, ChevronRight, Pause, Play, Terminal } from "lucide-react";
 import type { PublicHeroSlide } from "@/lib/cms-public";
+
+function subscribeReducedMotion(callback: () => void) {
+  if (typeof window === "undefined" || !window.matchMedia) return () => {};
+  const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+  mq.addEventListener("change", callback);
+  return () => mq.removeEventListener("change", callback);
+}
+
+function getReducedMotionSnapshot() {
+  if (typeof window === "undefined" || !window.matchMedia) return false;
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+function getReducedMotionServerSnapshot() {
+  return false;
+}
 
 export function HeroSlideshow({ slides }: { slides: PublicHeroSlide[] }) {
   const activeSlides = slides.length > 0 ? slides : [];
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(true);
   const [isHovered, setIsHovered] = useState(false);
+  const prefersReducedMotion = useSyncExternalStore(
+    subscribeReducedMotion,
+    getReducedMotionSnapshot,
+    getReducedMotionServerSnapshot,
+  );
   const touchStartX = useRef<number | null>(null);
   const touchEndX = useRef<number | null>(null);
 
   // Auto-rotation timer (5 seconds)
   useEffect(() => {
-    if (!isPlaying || isHovered || activeSlides.length <= 1) return;
+    if (!isPlaying || isHovered || activeSlides.length <= 1 || prefersReducedMotion) return;
 
     const timer = setInterval(() => {
       setCurrentIndex((prev) => (prev + 1) % activeSlides.length);
     }, 5000);
 
     return () => clearInterval(timer);
-  }, [isPlaying, isHovered, activeSlides.length]);
+  }, [isPlaying, isHovered, activeSlides.length, prefersReducedMotion]);
 
   const handleNext = () => {
     setCurrentIndex((prev) => (prev + 1) % activeSlides.length);
@@ -70,26 +91,49 @@ export function HeroSlideshow({ slides }: { slides: PublicHeroSlide[] }) {
       onTouchMove={handleTouchMove}
       onTouchStart={handleTouchStart}
     >
-      <div className="hero-banner-inner" role="group" aria-roledescription="slide" aria-label={`Slide ${currentIndex + 1} of ${activeSlides.length}: ${currentSlide.title}`}>
+      <div
+        className="hero-banner-inner"
+        role="group"
+        aria-roledescription="slide"
+        aria-label={`Slide ${currentIndex + 1} of ${activeSlides.length}: ${currentSlide.title}`}
+      >
         {/* Render stacked slides for crossfade */}
         {activeSlides.map((slide, idx) => {
           const isActive = idx === currentIndex;
+          const isVideo =
+            slide.imageUrl.endsWith(".mp4") ||
+            slide.imageUrl.endsWith(".webm") ||
+            slide.imageUrl.includes("video/");
+
           return (
             <div
               className={`hero-slide-pane ${isActive ? "slide-active" : "slide-hidden"}`}
               key={slide.id || idx}
               aria-hidden={!isActive}
             >
-              <Image
-                src={slide.imageUrl}
-                alt={slide.altText || slide.title}
-                width={1400}
-                height={700}
-                priority={idx === 0}
-                loading={idx === 0 ? "eager" : "lazy"}
-                sizes="(max-width: 768px) 100vw, (max-width: 1200px) 95vw, 1200px"
-                className="hero-banner-img"
-              />
+              {isVideo ? (
+                <video
+                  src={slide.imageUrl}
+                  autoPlay={!prefersReducedMotion}
+                  muted
+                  loop
+                  playsInline
+                  aria-label={slide.altText || slide.title}
+                  className="hero-banner-img"
+                  style={{ objectFit: "cover", width: "100%", height: "100%" }}
+                />
+              ) : (
+                <Image
+                  src={slide.imageUrl}
+                  alt={slide.altText || slide.title}
+                  width={1400}
+                  height={700}
+                  priority={idx === 0}
+                  loading={idx === 0 ? "eager" : "lazy"}
+                  sizes="(max-width: 768px) 100vw, (max-width: 1200px) 95vw, 1200px"
+                  className="hero-banner-img"
+                />
+              )}
             </div>
           );
         })}

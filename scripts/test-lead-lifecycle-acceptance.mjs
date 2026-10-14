@@ -45,7 +45,7 @@ async function runLeadAcceptanceTest() {
 
   try {
     // 1. Verify table accessibility
-    const { count, error: tableErr } = await serviceClient
+    const { error: tableErr } = await serviceClient
       .from("platform_sales_leads")
       .select("*", { count: "exact", head: true });
 

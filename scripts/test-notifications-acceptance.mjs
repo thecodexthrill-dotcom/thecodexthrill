@@ -45,7 +45,7 @@ async function runNotificationsAcceptanceTest() {
   }
 
   // 1. Schema check
-  const { data: schemaProbe, error: schemaErr } = await serviceClient
+  const { error: schemaErr } = await serviceClient
     .from("user_notifications")
     .select("id, user_id, title, message, type, link_url, is_read, created_at")
     .limit(1);

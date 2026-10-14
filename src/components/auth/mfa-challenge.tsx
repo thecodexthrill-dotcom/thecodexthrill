@@ -103,7 +103,7 @@ export function MfaChallenge({
       window.location.assign(nextPath);
     } catch {
       setCode("");
-      setMessage("The code could not be verified or Supabase did not confirm AAL2. Check the device time and try a current code.");
+      setMessage("The code could not be verified or security assurance level could not be confirmed. Check your device time and try a current code.");
     } finally {
       setBusy(false);
     }
@@ -121,7 +121,7 @@ export function MfaChallenge({
 
     {screen === "unfinished" && <div className="module-panel">
       <h2>Finish authenticator setup</h2>
-      <p>A previous setup left an unverified factor. It cannot be used to sign in, and Supabase cannot show its setup key again. Choose restart to remove only that unverified setup and create a new one. Verified factors are never removed here.</p>
+      <p>A previous setup left an unverified factor. It cannot be used to sign in, and the setup key cannot be shown again. Choose restart to remove only that unverified setup and create a new one. Verified factors are never removed here.</p>
       <button className="button-gold" disabled={busy} onClick={() => void beginEnrollment(true)} type="button">{busy ? "Restarting setup…" : "Restart unfinished setup"}</button>
     </div>}
 
@@ -143,7 +143,7 @@ export function MfaChallenge({
       <label>Six-digit authenticator code<input autoComplete="one-time-code" inputMode="numeric" maxLength={6} minLength={6} onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 6))} pattern="[0-9]{6}" required value={code} /></label>
       <button className="button-gold" disabled={busy} type="submit">{busy ? "Verifying…" : "Verify and continue"}</button>
       <p className="module-note">Already enrolled? Use a current code from one of the verified authenticator devices. If you still have a verified device, manage or replace factors at <Link href="/account/security">Account security</Link>.</p>
-      <p className="module-note">If you have lost access to every verified device, sign-in recovery requires an identity-verified factor reset by the Supabase project owner. <a href="https://supabase.com/dashboard/project/isgoypmebtoipfvtaflg/auth/users" rel="noreferrer" target="_blank">Open Supabase Auth users</a>. The application will not bypass MFA.</p>
+      <p className="module-note">If you have lost access to every verified device, account recovery requires an identity-verified factor reset by a platform administrator. Contact support for verified identity recovery. Multi-factor authentication cannot be bypassed.</p>
     </form>}
 
     {message && <p aria-live="polite" className="auth-feedback" role="status">{message}</p>}

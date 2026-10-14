@@ -37,7 +37,11 @@ export async function GET(request: NextRequest) {
   const platform = platformResult.data ?? [];
   const superAdmin = superAdminResult.data;
   const member = membershipResult.data;
-  if (!member && !superAdmin && platform.length === 0) return NextResponse.redirect(new URL("/access-pending", request.url));
+  if (!member && !superAdmin && platform.length === 0) {
+    const isInvitedClient = Boolean(user.invited_at);
+    const pendingPath = isInvitedClient ? "/access-pending?type=client_provisioning" : "/access-pending";
+    return NextResponse.redirect(new URL(pendingPath, request.url));
+  }
   const destination = superAdmin || platform.some((item) => ["platform_admin", "developer", "support_staff"].includes(item.role))
     ? "/admin"
     : "/portal";

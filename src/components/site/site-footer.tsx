@@ -131,7 +131,7 @@ export function SiteFooter() {
             </a>
             <div className="footer-security-badge">
               <ShieldCheck aria-hidden="true" size={15} />
-              <span>Supabase Cloud · Zero-Trust RLS</span>
+              <span>Encrypted Cloud · Zero-Trust Architecture</span>
             </div>
           </div>
 

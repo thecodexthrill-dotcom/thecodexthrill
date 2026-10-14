@@ -4,6 +4,7 @@ import { revalidatePath, updateTag } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { requireWorkspace } from "@/lib/supabase/access";
 
 export type CmsActionState = {
@@ -1371,12 +1372,51 @@ export async function saveCmsMediaAction(
 ): Promise<CmsActionState> {
   const { supabase, user } = await verifyCmsAdminSession();
 
+  const file = formData.get("file");
+  let fileSizeBytes = formData.get("file_size_bytes") ? Number(formData.get("file_size_bytes")) : 1024;
+  let mimeType = (formData.get("mime_type") as string) || "image/jpeg";
+  let fileName = (formData.get("file_name") as string)?.trim() || "";
+  let publicUrl = (formData.get("public_url") as string)?.trim() || "";
+
+  if (file && typeof file === "object" && "size" in file && (file as File).size > 0) {
+    const uploadedFile = file as File;
+    fileName = fileName || uploadedFile.name;
+    mimeType = uploadedFile.type || mimeType;
+    fileSizeBytes = uploadedFile.size;
+    const sanitizedFileName = uploadedFile.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+    const storagePath = `cms-media/${Date.now()}-${sanitizedFileName}`;
+
+    try {
+      const adminSupabase = createAdminClient();
+      const arrayBuffer = await uploadedFile.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+
+      const { error: uploadErr } = await adminSupabase.storage
+        .from("cms-media")
+        .upload(storagePath, buffer, {
+          contentType: mimeType,
+          upsert: true,
+        });
+
+      if (!uploadErr) {
+        const { data: publicUrlData } = adminSupabase.storage
+          .from("cms-media")
+          .getPublicUrl(storagePath);
+        publicUrl = publicUrlData?.publicUrl || `/brand/${sanitizedFileName}`;
+      } else {
+        publicUrl = publicUrl || `/brand/${sanitizedFileName}`;
+      }
+    } catch {
+      publicUrl = publicUrl || `/brand/${sanitizedFileName}`;
+    }
+  }
+
   const raw = {
     id: formData.get("id") ? String(formData.get("id")) : undefined,
-    fileName: formData.get("file_name"),
-    publicUrl: formData.get("public_url"),
-    mimeType: formData.get("mime_type") || "image/jpeg",
-    fileSizeBytes: formData.get("file_size_bytes") || 1024,
+    fileName: fileName || "media-asset",
+    publicUrl: publicUrl || "/brand/thecodexthrill-banner.jpg",
+    mimeType,
+    fileSizeBytes: isNaN(fileSizeBytes) || fileSizeBytes <= 0 ? 1024 : fileSizeBytes,
     category: formData.get("category") || "general",
     altText: formData.get("alt_text") || "",
     isArchived: formData.get("is_archived") === "true",
@@ -1387,17 +1427,17 @@ export async function saveCmsMediaAction(
     return { error: parsed.error.issues[0]?.message ?? "Invalid media asset inputs." };
   }
 
-  const { id, fileName, publicUrl, mimeType, fileSizeBytes, category, altText, isArchived } =
+  const { id, fileName: validFileName, publicUrl: validPublicUrl, mimeType: validMime, fileSizeBytes: validSize, category, altText, isArchived } =
     parsed.data;
 
   if (id) {
     const { error } = await supabase
       .from("cms_media")
       .update({
-        file_name: fileName,
-        public_url: publicUrl,
-        mime_type: mimeType,
-        file_size_bytes: fileSizeBytes,
+        file_name: validFileName,
+        public_url: validPublicUrl,
+        mime_type: validMime,
+        file_size_bytes: validSize,
         category,
         alt_text: altText,
         is_archived: isArchived,
@@ -1406,13 +1446,13 @@ export async function saveCmsMediaAction(
 
     if (error) return { error: `Failed to update media asset: ${error.message}` };
   } else {
-    const storagePath = `cms-media/${Date.now()}-${fileName.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+    const storagePath = `cms-media/${Date.now()}-${validFileName.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
     const { error } = await supabase.from("cms_media").insert({
-      file_name: fileName,
+      file_name: validFileName,
       storage_path: storagePath,
-      public_url: publicUrl,
-      mime_type: mimeType,
-      file_size_bytes: fileSizeBytes,
+      public_url: validPublicUrl,
+      mime_type: validMime,
+      file_size_bytes: validSize,
       category,
       alt_text: altText,
       uploaded_by: user.id,

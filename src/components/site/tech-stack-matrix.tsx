@@ -25,7 +25,7 @@ export const defaultTechMatrix: TechGroup[] = [
     icon: Database,
     technologies: [
       { name: "PostgreSQL", role: "Relational data integrity, ACID transactions, complex joins" },
-      { name: "Supabase Cloud", role: "Managed enterprise database with instant auth, storage, and RLS" },
+      { name: "Enterprise Cloud Database", role: "High-performance relational data store with auth, storage, and RLS" },
       { name: "Row-Level Security (RLS)", role: "Cryptographic data isolation at the database engine level" },
       { name: "Next.js Server Actions", role: "Secure RPC with server-side validation and CSRF mitigation" },
       { name: "Zod Schema Validation", role: "Runtime contract validation on every client-to-server payload" },
@@ -60,7 +60,7 @@ export const defaultTechMatrix: TechGroup[] = [
       { name: "AAL2 Multi-Factor Auth", role: "Authenticator TOTP & WebAuthn biometric security gates" },
       { name: "GitHub Actions CI/CD", role: "Automated linting, type-checking, unit, and regression testing" },
       { name: "Docker Containerization", role: "Deterministic builds and isolated execution environments" },
-      { name: "Declarative Migrations", role: "Version-controlled, reversible schema changes with Supabase CLI" },
+      { name: "Declarative Migrations", role: "Version-controlled, reversible schema changes with automated release gates" },
       { name: "Strict CSP & CORS", role: "Zero inline scripts, strict frame-ancestors, defense in depth" },
     ],
   },

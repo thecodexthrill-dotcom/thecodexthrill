@@ -927,6 +927,10 @@ export async function createDocumentRecordAction(formData: FormData) {
 
   if (file && typeof file === "object" && "size" in file && (file as File).size > 0) {
     const uploadedFile = file as File;
+    if (uploadedFile.size > 25 * 1024 * 1024) {
+      redirect(`${returnPath}?error=file_too_large`);
+    }
+
     const adminSupabase = createAdminClient();
     const sanitizedFileName = uploadedFile.name.replace(/[^a-zA-Z0-9._-]/g, "_");
     const storagePath = `${organizationId.data}/${Date.now()}-${sanitizedFileName}`;
@@ -945,7 +949,7 @@ export async function createDocumentRecordAction(formData: FormData) {
         level: "error",
         scope: "delivery.documents",
         action: "storage_upload_failed",
-        message: "Supabase Storage deliverable upload failed",
+        message: "Secure document storage upload failed",
         metadata: {
           organizationId: organizationId.data,
           message: uploadErr.message,
@@ -955,11 +959,8 @@ export async function createDocumentRecordAction(formData: FormData) {
       redirect(`${returnPath}?error=save`);
     }
 
-    const { data: signedData } = await adminSupabase.storage
-      .from("tenant-documents")
-      .createSignedUrl(storagePath, 60 * 60 * 24 * 7); // 7 days signed URL
-
-    fileUrl = signedData?.signedUrl || storagePath;
+    // Canonical relative path stored in database. Fresh signed URLs are generated on demand via /api/documents/[id]/download.
+    fileUrl = storagePath;
     fileSizeBytes = uploadedFile.size;
     fileType = uploadedFile.type || "application/octet-stream";
   } else if (!fileUrl) {
@@ -1003,6 +1004,76 @@ export async function createDocumentRecordAction(formData: FormData) {
   redirect(`${returnPath}?created=1`);
 }
 
+const updateDocumentSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string().trim().min(1).max(255),
+  category: z.enum(["contract", "deliverable", "invoice", "asset", "specification", "other"]),
+  project_id: z.string().uuid().optional().or(z.literal("")),
+});
+
+export async function updateDocumentAction(formData: FormData) {
+  const isPortal = formData.get("return_path") === "portal";
+  const returnPath = isPortal ? "/portal/files" : "/admin/files";
+  const { user } = await requireWorkspace(isPortal ? "portal" : "admin", ["files"]);
+
+  const parsed = updateDocumentSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) {
+    redirect(`${returnPath}?error=invalid`);
+  }
+
+  const supabase = await createClient();
+  const { data: existingDoc } = await supabase
+    .from("tenant_documents")
+    .select("id, organization_id, uploaded_by")
+    .eq("id", parsed.data.id)
+    .single();
+
+  if (!existingDoc) {
+    redirect(`${returnPath}?error=invalid`);
+  }
+
+  if (isPortal) {
+    const activeOrgIds = await getUserActiveOrganizationIds(supabase, user.id);
+    if (!canPortalUserAccessOrganization(existingDoc.organization_id, activeOrgIds)) {
+      redirect("/access-denied");
+    }
+  }
+
+  const rawProjectId = parsed.data.project_id;
+  const projectId = rawProjectId && rawProjectId.length > 0 ? rawProjectId : null;
+  if (projectId) {
+    const { data: linkedProject } = await supabase
+      .from("tenant_projects")
+      .select("organization_id")
+      .eq("id", projectId)
+      .maybeSingle();
+
+    if (!linkedProject || linkedProject.organization_id !== existingDoc.organization_id) {
+      redirect(`${returnPath}?error=invalid`);
+    }
+  }
+
+  const { error } = await supabase
+    .from("tenant_documents")
+    .update({
+      name: parsed.data.name,
+      category: parsed.data.category,
+      project_id: projectId,
+    })
+    .eq("id", parsed.data.id);
+
+  if (error) {
+    redirect(`${returnPath}?error=save`);
+  }
+
+  revalidatePath("/admin/files");
+  revalidatePath("/portal/files");
+  revalidatePath("/admin/projects");
+  revalidatePath("/portal/projects");
+  revalidatePath("/portal");
+  redirect(`${returnPath}?updated=1`);
+}
+
 export async function deleteDocumentAction(formData: FormData) {
   const id = z.string().uuid().safeParse(formData.get("id"));
   const isPortal = formData.get("return_path") === "portal";
@@ -1040,13 +1111,18 @@ export async function deleteDocumentAction(formData: FormData) {
     redirect(`${returnPath}?error=save`);
   }
 
+  let storagePath: string | null = null;
   if (doc.file_url?.includes("tenant-documents/")) {
+    const raw = doc.file_url.split("tenant-documents/")[1]?.split("?")[0];
+    if (raw) storagePath = decodeURIComponent(raw);
+  } else if (doc.file_url && !doc.file_url.startsWith("http://") && !doc.file_url.startsWith("https://")) {
+    storagePath = doc.file_url;
+  }
+
+  if (storagePath) {
     try {
       const adminClient = createAdminClient();
-      const storagePath = doc.file_url.split("tenant-documents/")[1]?.split("?")[0];
-      if (storagePath) {
-        await adminClient.storage.from("tenant-documents").remove([storagePath]);
-      }
+      await adminClient.storage.from("tenant-documents").remove([storagePath]);
     } catch {
       // Non-blocking cleanup
     }

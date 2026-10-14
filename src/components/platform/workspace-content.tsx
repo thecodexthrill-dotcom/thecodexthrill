@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { z } from "zod";
 import { ArrowLeft, ArrowRight, ShieldCheck, FolderKanban, UserPlus, Layers, CalendarClock } from "lucide-react";
 import { InvitationForm } from "@/components/auth/invitation-form";
 import { InvitationRowActions } from "@/components/auth/invitation-row-actions";
@@ -464,8 +465,17 @@ export async function WorkspaceContent({
     if (error) return <ConnectionError title="Lead records are unavailable" description="The request failed under the current account's database permissions." />;
     const leads = allLeads ?? [];
 
-    if (targetId) {
-      const lead = leads.find((l) => l.id === targetId) ?? (await supabase.from("platform_sales_leads").select("*").eq("id", targetId).maybeSingle()).data;
+    const cleanTargetId = targetId?.trim();
+    if (cleanTargetId) {
+      let lead = leads.find((l) => l.id.toLowerCase() === cleanTargetId.toLowerCase());
+      if (!lead && z.string().uuid().safeParse(cleanTargetId).success) {
+        const { data: singleLead } = await supabase
+          .from("platform_sales_leads")
+          .select("*")
+          .eq("id", cleanTargetId)
+          .maybeSingle();
+        lead = singleLead ?? undefined;
+      }
 
       if (!lead) {
         return (
@@ -585,7 +595,7 @@ export async function WorkspaceContent({
                 <p className="eyebrow" style={{ color: "var(--gold)" }}>CLIENT ONBOARDING FUNNEL</p>
                 <h3 style={{ fontSize: "17px", margin: "4px 0 10px" }}>Convert Lead to Client Organization</h3>
                 <p style={{ fontSize: "13px", color: "var(--muted)", margin: "0 0 16px", lineHeight: "1.6" }}>
-                  Converts this prospect into an active Client Organization in Supabase Cloud, provisions an initial Delivery Handover Project in tenant_projects, logs an immutable audit event, and initiates client portal access.
+                  Converts this prospect into an active Client Organization in the platform database, provisions an initial Delivery Handover Project in tenant_projects, logs an immutable audit event, and initiates client portal access.
                 </p>
                 <form action={convertLeadToClientAction} className="auth-form lead-create-form">
                   <input type="hidden" name="lead_id" value={lead.id} />
@@ -632,7 +642,7 @@ export async function WorkspaceContent({
                 <div>
                   <strong style={{ color: "var(--gold-ink)", fontSize: "14px" }}>Lead Converted to Client Organization</strong>
                   <p style={{ margin: "4px 0 0", fontSize: "13px", color: "var(--muted)" }}>
-                    This prospect was converted. Client organization, delivery handover project, and audit events are active in Supabase Cloud.
+                    This prospect was converted. Client organization, delivery handover project, and audit events are active in the platform database.
                   </p>
                 </div>
                 <Link className="button button-gold button-small" href="/admin/clients">
@@ -781,7 +791,7 @@ export async function WorkspaceContent({
               </Link>
               <div className="module-alert" role="alert">
                 <strong>Organization not found</strong>
-                <p>The requested client organization could not be located in Supabase Cloud.</p>
+                <p>The requested client organization could not be located in the platform database.</p>
               </div>
             </section>
           </div>
@@ -811,7 +821,7 @@ export async function WorkspaceContent({
             </div>
 
             <div style={{ marginTop: "20px" }}>
-              <p className="eyebrow">CLIENT ORGANIZATION · SUPABASE CLOUD</p>
+              <p className="eyebrow">CLIENT ORGANIZATION · SECURE PLATFORM</p>
               <h2 style={{ margin: "6px 0 4px" }}>{org.name}</h2>
               <p style={{ color: "var(--muted)", margin: 0 }}>
                 Provisioned on {new Date(org.created_at).toLocaleDateString()} · ID: <code>{org.id}</code>
@@ -1757,9 +1767,9 @@ function Notice({ state }: { state: string }) {
     created: "Record created.",
     updated: "Changes saved.",
     deleted: "Record permanently removed.",
-    converted: "Lead converted to Client Organization. Delivery Handover Project initialized in Supabase Cloud.",
+    converted: "Lead converted to Client Organization. Delivery Handover Project initialized.",
     invited: "Client portal invitation dispatched and recorded in audit log.",
-    smtp_pending: "Client organization & project created. Portal invitation recorded in pending state (Note: custom SMTP provider is not yet configured in Supabase Cloud, so email dispatch was deferred).",
+    smtp_pending: "Client organization & project created. Portal invitation recorded in pending state (email delivery will complete upon custom email provider configuration).",
     invalid: "Please check the submitted fields and try again.",
     save: "The database rejected this change. Check the current role, MFA level, and field values.",
     not_found: "Requested record could not be found.",

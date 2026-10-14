@@ -1,10 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { FileText, Plus, ExternalLink, Trash2 } from "lucide-react";
+import { FileText, Plus, ExternalLink, Trash2, Edit2 } from "lucide-react";
 import Link from "next/link";
 import {
   createDocumentRecordAction,
+  updateDocumentAction,
   deleteDocumentAction,
 } from "@/lib/supabase/operations-actions";
 
@@ -39,8 +40,10 @@ export function DocumentManager({
   queryError,
 }: DocumentManagerProps) {
   const [showUploadModal, setShowUploadModal] = useState(false);
+  const [editingDoc, setEditingDoc] = useState<DocumentRecord | null>(null);
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [selectedOrgId, setSelectedOrgId] = useState<string>(userOrganizations[0]?.id ?? "");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const filteredDocs = documents.filter((d) => {
     if (categoryFilter === "all") return true;
@@ -48,13 +51,28 @@ export function DocumentManager({
   });
 
   const orgProjects = projects.filter(
-    (p) => !selectedOrgId || p.organization_id === selectedOrgId
+    (p) => !selectedOrgId || p.organization_id === selectedOrgId,
   );
 
   const resolveProjectName = (projectId: string | null) => {
     if (!projectId) return null;
     return projects.find((p) => p.id === projectId)?.name ?? null;
   };
+
+  const noticeText =
+    notice === "created"
+      ? "Document record registered and shared with organization."
+      : notice === "updated"
+        ? "Document record updated successfully."
+        : notice === "deleted"
+          ? "Document record deleted."
+          : notice === "file_too_large"
+            ? "Uploaded file exceeds the 25MB maximum limit. Please upload a smaller file or provide an external URL."
+            : notice === "invalid"
+              ? "Invalid submission. Please check all required fields and try again."
+              : notice === "save"
+                ? "The database rejected the document update. Verify your permissions and try again."
+                : notice;
 
   return (
     <div className="workspace-content" style={{ display: "grid", gap: "24px" }}>
@@ -70,27 +88,51 @@ export function DocumentManager({
             fontSize: "14px",
           }}
         >
-          <strong>Database Notice:</strong> Unable to load documents from Supabase ({queryError}).
+          <strong>Database Notice:</strong> Unable to load documents from database ({queryError}).
         </div>
       )}
 
       {notice && (
-        <p className={notice === "invalid" || notice === "save" ? "module-alert" : "module-success"} role="status">
-          {notice === "created" ? "Document record created and shared with organization." : notice === "deleted" ? "Document record deleted." : notice}
+        <p
+          className={
+            notice === "invalid" || notice === "save" || notice === "file_too_large"
+              ? "module-alert"
+              : "module-success"
+          }
+          role="status"
+        >
+          {noticeText}
         </p>
       )}
 
       {isStaff && userOrganizations.length === 0 && (
         <div className="module-panel" style={{ border: "1px dashed var(--gold)", padding: "16px" }}>
           <p style={{ margin: 0, fontSize: "14px", color: "var(--gold)" }}>
-            <strong>Notice:</strong> No client organization found. Please <Link href="/admin/clients" style={{ textDecoration: "underline", color: "var(--gold)" }}>create an organization in Clients</Link> first to register deliverable documents.
+            <strong>Notice:</strong> No client organization found. Please{" "}
+            <Link
+              href="/admin/clients"
+              style={{ textDecoration: "underline", color: "var(--gold)" }}
+            >
+              create an organization in Clients
+            </Link>{" "}
+            first to register deliverable documents.
           </p>
         </div>
       )}
 
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "16px" }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          flexWrap: "wrap",
+          gap: "16px",
+        }}
+      >
         <div>
-          <h2 style={{ fontSize: "20px", fontWeight: 700, margin: 0 }}>Documents &amp; Project Deliverables</h2>
+          <h2 style={{ fontSize: "20px", fontWeight: 700, margin: 0 }}>
+            Documents &amp; Project Deliverables
+          </h2>
           <p style={{ margin: "4px 0 0", color: "var(--muted)", fontSize: "14px" }}>
             Secure repository of technical specifications, contracts, architecture decks, and project handover deliverables.
           </p>
@@ -99,7 +141,10 @@ export function DocumentManager({
         {userOrganizations.length > 0 && (
           <button
             type="button"
-            onClick={() => setShowUploadModal(!showUploadModal)}
+            onClick={() => {
+              setEditingDoc(null);
+              setShowUploadModal(!showUploadModal);
+            }}
             className="button button-gold"
             style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}
           >
@@ -108,7 +153,7 @@ export function DocumentManager({
         )}
       </div>
 
-
+      {/* Upload Modal / Panel */}
       {showUploadModal && userOrganizations.length > 0 && (
         <section className="module-panel" style={{ border: "1px solid var(--gold)" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -123,7 +168,13 @@ export function DocumentManager({
             </button>
           </div>
 
-          <form action={createDocumentRecordAction} encType="multipart/form-data" className="auth-form" style={{ marginTop: "16px", display: "grid", gap: "14px" }}>
+          <form
+            action={createDocumentRecordAction}
+            encType="multipart/form-data"
+            className="auth-form"
+            onSubmit={() => setIsSubmitting(true)}
+            style={{ marginTop: "16px", display: "grid", gap: "14px" }}
+          >
             <input type="hidden" name="return_path" value={isStaff ? "admin" : "portal"} />
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
               <label>
@@ -134,7 +185,9 @@ export function DocumentManager({
                   onChange={(e) => setSelectedOrgId(e.target.value)}
                 >
                   {userOrganizations.map((org) => (
-                    <option key={org.id} value={org.id}>{org.name}</option>
+                    <option key={org.id} value={org.id}>
+                      {org.name}
+                    </option>
                   ))}
                 </select>
               </label>
@@ -154,18 +207,43 @@ export function DocumentManager({
 
             <label>
               Document / Deliverable Name
-              <input name="name" required maxLength={255} placeholder="e.g., Phase 1 Architecture Specification & Runbook" />
+              <input
+                name="name"
+                required
+                maxLength={255}
+                placeholder="e.g., Phase 1 Architecture Specification & Runbook"
+              />
             </label>
 
-            <div style={{ display: "grid", gap: "8px", background: "rgba(255, 255, 255, 0.02)", padding: "12px", borderRadius: "6px", border: "1px solid var(--border)" }}>
+            <div
+              style={{
+                display: "grid",
+                gap: "8px",
+                background: "rgba(255, 255, 255, 0.02)",
+                padding: "12px",
+                borderRadius: "6px",
+                border: "1px solid var(--border)",
+              }}
+            >
               <label style={{ fontSize: "13px" }}>
-                Option A: Upload File to Cloud Storage (PDF, Doc, Image, Zip)
-                <input name="file" type="file" style={{ fontSize: "12px", marginTop: "4px" }} />
+                Option A: Upload File to Secure Cloud Storage (PDF, Doc, Image, Zip — max 25MB)
+                <input
+                  name="file"
+                  type="file"
+                  style={{ fontSize: "12px", marginTop: "4px" }}
+                />
               </label>
-              <div style={{ textAlign: "center", color: "var(--muted)", fontSize: "11px" }}>— OR —</div>
+              <div style={{ textAlign: "center", color: "var(--muted)", fontSize: "11px" }}>
+                — OR —
+              </div>
               <label style={{ fontSize: "13px" }}>
                 Option B: External Resource URL (Figma, GitHub Release, Shared Cloud Link)
-                <input name="file_url" type="url" placeholder="https://..." style={{ fontSize: "12px", marginTop: "4px" }} />
+                <input
+                  name="file_url"
+                  type="url"
+                  placeholder="https://..."
+                  style={{ fontSize: "12px", marginTop: "4px" }}
+                />
               </label>
             </div>
 
@@ -181,9 +259,96 @@ export function DocumentManager({
               </select>
             </label>
 
-            <button type="submit" className="button button-gold" style={{ justifySelf: "start" }}>
-              Save Document Record
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="button button-gold"
+              style={{ justifySelf: "start" }}
+            >
+              {isSubmitting ? "Saving Document…" : "Save Document Record"}
             </button>
+          </form>
+        </section>
+      )}
+
+      {/* Edit Document Modal */}
+      {editingDoc && (
+        <section className="module-panel" style={{ border: "1px solid var(--gold)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <h3 style={{ fontSize: "18px", margin: 0 }}>Edit Document Record</h3>
+            <button
+              type="button"
+              onClick={() => setEditingDoc(null)}
+              className="button button-secondary"
+              style={{ padding: "4px 10px", fontSize: "12px" }}
+            >
+              Cancel
+            </button>
+          </div>
+
+          <form
+            action={updateDocumentAction}
+            className="auth-form"
+            onSubmit={() => setIsSubmitting(true)}
+            style={{ marginTop: "16px", display: "grid", gap: "14px" }}
+          >
+            <input type="hidden" name="id" value={editingDoc.id} />
+            <input type="hidden" name="return_path" value={isStaff ? "admin" : "portal"} />
+
+            <label>
+              Document / Deliverable Name
+              <input
+                name="name"
+                required
+                maxLength={255}
+                defaultValue={editingDoc.name}
+              />
+            </label>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+              <label>
+                Category
+                <select name="category" defaultValue={editingDoc.category}>
+                  <option value="deliverable">Deliverable</option>
+                  <option value="specification">Specification / Architecture</option>
+                  <option value="contract">Contract / Legal</option>
+                  <option value="invoice">Invoice / Financial</option>
+                  <option value="asset">Asset / Media</option>
+                  <option value="other">Other</option>
+                </select>
+              </label>
+
+              <label>
+                Linked Delivery Project
+                <select name="project_id" defaultValue={editingDoc.project_id ?? ""}>
+                  <option value="">General Organization Document</option>
+                  {projects
+                    .filter((p) => p.organization_id === editingDoc.organization_id)
+                    .map((proj) => (
+                      <option key={proj.id} value={proj.id}>
+                        {proj.name}
+                      </option>
+                    ))}
+                </select>
+              </label>
+            </div>
+
+            <div style={{ display: "flex", gap: "10px", marginTop: "4px" }}>
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="button button-gold"
+              >
+                {isSubmitting ? "Saving…" : "Save Changes"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setEditingDoc(null)}
+                className="button button-secondary"
+              >
+                Cancel
+              </button>
+            </div>
           </form>
         </section>
       )}
@@ -254,19 +419,45 @@ export function DocumentManager({
                     <td>
                       <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
                         <a
-                          href={doc.file_url}
+                          href={`/api/documents/${doc.id}/download`}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="button button-secondary"
-                          style={{ padding: "4px 8px", fontSize: "12px", display: "inline-flex", alignItems: "center", gap: "6px" }}
+                          style={{
+                            padding: "4px 8px",
+                            fontSize: "12px",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "6px",
+                          }}
                         >
                           Open <ExternalLink size={12} />
                         </a>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowUploadModal(false);
+                            setEditingDoc(doc);
+                          }}
+                          className="button button-small button-secondary"
+                          style={{
+                            padding: "4px 8px",
+                            fontSize: "12px",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "4px",
+                          }}
+                          title="Edit document details"
+                        >
+                          <Edit2 size={12} /> Edit
+                        </button>
                         {isStaff && (
                           <form
                             action={deleteDocumentAction}
                             onSubmit={(e) => {
-                              if (!confirm(`Are you sure you want to delete "${doc.name}"?`)) e.preventDefault();
+                              if (!confirm(`Are you sure you want to delete "${doc.name}"?`)) {
+                                e.preventDefault();
+                              }
                             }}
                           >
                             <input type="hidden" name="id" value={doc.id} />
@@ -293,4 +484,3 @@ export function DocumentManager({
     </div>
   );
 }
-

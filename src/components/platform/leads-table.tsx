@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Search, CalendarClock, Layers } from "lucide-react";
 import { extractLeadService, getLeadFollowUpStatus } from "@/lib/supabase/lead-service-helper";
 
@@ -18,6 +19,7 @@ export type LeadListItem = {
 };
 
 export function LeadsTable({ leads }: { leads: LeadListItem[] }) {
+  const router = useRouter();
   const [selectedStage, setSelectedStage] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState<string>("");
 
@@ -121,7 +123,14 @@ export function LeadsTable({ leads }: { leads: LeadListItem[] }) {
                 const followUpInfo = getLeadFollowUpStatus(lead.follow_up_at);
 
                 return (
-                  <tr key={lead.id}>
+                  <tr
+                    key={lead.id}
+                    style={{ cursor: "pointer", transition: "background 120ms ease" }}
+                    onClick={(e) => {
+                      if ((e.target as HTMLElement).closest("a, button, input, select")) return;
+                      router.push(`/admin/leads?id=${lead.id}`);
+                    }}
+                  >
                     <td>
                       <Link
                         href={`/admin/leads?id=${lead.id}`}

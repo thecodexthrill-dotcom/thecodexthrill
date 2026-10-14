@@ -5,7 +5,6 @@ import {
   buildExecutiveCsvReport,
   computeCommercialExecutiveAnalytics,
   computeDeliveryExecutiveAnalytics,
-  computeGovernanceAndOperationsAnalytics,
   computeLeadExecutiveAnalytics,
   computeOrganizationExecutiveAnalytics,
   computePeriodComparison,

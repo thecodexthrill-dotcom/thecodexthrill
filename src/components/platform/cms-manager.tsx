@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import { Edit2, Plus, Trash2, Eye, EyeOff, Layers, Terminal, Compass, Landmark, Cpu, HelpCircle, RotateCcw } from "lucide-react";
+import { Edit2, Plus, Trash2, RotateCcw, Copy, Check, Video, Image as ImageIcon } from "lucide-react";
 import {
   saveCmsPageAction,
   deleteCmsPageAction,
@@ -1906,11 +1906,41 @@ export type CmsMediaRecord = {
   created_at: string;
 };
 
+export function formatMediaBytes(bytes: number, decimals = 1): string {
+  if (!bytes || bytes <= 0) return "0 B";
+  const k = 1024;
+  const dm = decimals < 0 ? 0 : decimals;
+  const sizes = ["B", "KB", "MB", "GB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i] || "MB"}`;
+}
+
+const MEDIA_CATEGORIES = ["ALL", "HERO", "PORTFOLIO", "BLOG", "BRAND", "GENERAL"] as const;
+
 export function CmsMediaManager({ media }: { media: CmsMediaRecord[] }) {
   const [saveState, saveAction, savePending] = useActionState(saveCmsMediaAction, initialState);
   const [deleteState, deleteAction, deletePending] = useActionState(deleteCmsMediaAction, initialState);
   const [editingItem, setEditingItem] = useState<CmsMediaRecord | null>(null);
   const [isCreating, setIsCreating] = useState(false);
+  const [selectedCategory, setSelectedCategory] = useState<string>("ALL");
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  const filteredMedia = media.filter((m) => {
+    if (selectedCategory === "ALL") return true;
+    return (m.category || "general").toLowerCase() === selectedCategory.toLowerCase();
+  });
+
+  const handleCopyUrl = async (id: string, url: string) => {
+    try {
+      if (typeof navigator !== "undefined" && navigator.clipboard) {
+        await navigator.clipboard.writeText(url);
+        setCopiedId(id);
+        setTimeout(() => setCopiedId(null), 2000);
+      }
+    } catch {
+      // Fallback ignore
+    }
+  };
 
   return (
     <div className="workspace-content">
@@ -1919,7 +1949,7 @@ export function CmsMediaManager({ media }: { media: CmsMediaRecord[] }) {
           <div>
             <p className="eyebrow">CMS ENGINE · MEDIA ASSETS</p>
             <h2>Public media library</h2>
-            <p>Register and govern public hero banners, case study cover graphics, and accessible alt text metadata.</p>
+            <p>Register, upload, and govern public hero banners, background videos, case study graphics, and accessible metadata.</p>
           </div>
           <button
             className="button button-gold module-heading-action"
@@ -1942,16 +1972,27 @@ export function CmsMediaManager({ media }: { media: CmsMediaRecord[] }) {
           <form
             action={saveAction}
             className="auth-form lead-create-form"
+            encType="multipart/form-data"
             style={{ marginTop: "24px", marginBottom: "32px", padding: "20px", border: "1px solid var(--line)", borderRadius: "14px", background: "var(--surface-raised)" }}
           >
             {editingItem && <input name="id" type="hidden" value={editingItem.id} />}
+            
+            <label style={{ gridColumn: "1 / -1" }}>
+              Upload Asset File (Optional — Auto-detects filename, MIME type, and size)
+              <input
+                accept="image/*,video/mp4,video/webm"
+                name="file"
+                type="file"
+              />
+            </label>
+
             <label>
               Asset File Name *
               <input defaultValue={editingItem?.file_name ?? ""} name="file_name" placeholder="thecodexthrill-banner.jpg" required type="text" />
             </label>
             <label>
               Public Asset URL / Path *
-              <input defaultValue={editingItem?.public_url ?? ""} name="public_url" placeholder="/brand/thecodexthrill-banner.jpg" required type="text" />
+              <input defaultValue={editingItem?.public_url ?? ""} name="public_url" placeholder="/brand/thecodexthrill-banner.jpg or https://..." required type="text" />
             </label>
             <label>
               Category
@@ -1965,11 +2006,15 @@ export function CmsMediaManager({ media }: { media: CmsMediaRecord[] }) {
             </label>
             <label>
               MIME Type
-              <input defaultValue={editingItem?.mime_type ?? "image/jpeg"} name="mime_type" placeholder="image/jpeg" type="text" />
+              <input defaultValue={editingItem?.mime_type ?? "image/jpeg"} name="mime_type" placeholder="image/jpeg or video/mp4" type="text" />
+            </label>
+            <label>
+              Estimated File Size (Bytes)
+              <input defaultValue={editingItem?.file_size_bytes ?? 1024} min="1" name="file_size_bytes" type="number" />
             </label>
             <label style={{ gridColumn: "1 / -1" }}>
-              Accessible Alt Text *
-              <input defaultValue={editingItem?.alt_text ?? ""} name="alt_text" placeholder="Descriptive alt text for screen readers and SEO" required type="text" />
+              Accessible Alt Text / Screen Reader Description *
+              <input defaultValue={editingItem?.alt_text ?? ""} name="alt_text" placeholder="Descriptive alt text for screen readers, posters, and SEO" required type="text" />
             </label>
             <div style={{ display: "flex", gap: "10px", gridColumn: "1 / -1" }}>
               <button className="button button-gold" disabled={savePending} type="submit">
@@ -1989,54 +2034,141 @@ export function CmsMediaManager({ media }: { media: CmsMediaRecord[] }) {
           </form>
         )}
 
-        <div className="module-table-wrap" style={{ marginTop: "20px" }}>
+        {/* Category Filter Pills */}
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginTop: "24px", marginBottom: "16px" }}>
+          {MEDIA_CATEGORIES.map((cat) => {
+            const isActive = selectedCategory === cat;
+            return (
+              <button
+                key={cat}
+                className={isActive ? "button button-gold button-small" : "button button-secondary button-small"}
+                onClick={() => setSelectedCategory(cat)}
+                style={{ fontSize: "12px", letterSpacing: "0.05em", padding: "6px 14px" }}
+                type="button"
+              >
+                {cat}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="module-table-wrap" style={{ marginTop: "10px" }}>
           <table className="module-table">
             <thead>
               <tr>
-                <th>Asset Name &amp; URL</th>
+                <th style={{ width: "64px" }}>Preview</th>
+                <th>Asset Name &amp; Details</th>
                 <th>Category</th>
                 <th>Alt Text</th>
-                <th>Actions</th>
+                <th style={{ width: "160px" }}>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {media.length === 0 ? (
+              {filteredMedia.length === 0 ? (
                 <tr>
-                  <td colSpan={4} style={{ textAlign: "center", padding: "24px" }}>
-                    No media assets registered yet. Click &quot;Register Media Asset&quot; to add public visual assets.
+                  <td colSpan={5} style={{ textAlign: "center", padding: "28px", color: "var(--text-muted)" }}>
+                    {media.length === 0
+                      ? "No media assets registered yet. Click \"Register Media Asset\" to add public visual assets."
+                      : `No assets found in category "${selectedCategory}".`}
                   </td>
                 </tr>
               ) : (
-                media.map((m) => (
-                  <tr key={m.id}>
-                    <td>
-                      <strong>{m.file_name}</strong>
-                      <small>{m.public_url}</small>
-                    </td>
-                    <td><span className="record-status">{m.category}</span></td>
-                    <td><small>{m.alt_text || "—"}</small></td>
-                    <td>
-                      <div style={{ display: "flex", gap: "8px" }}>
-                        <button
-                          className="button button-small button-secondary"
-                          onClick={() => {
-                            setIsCreating(false);
-                            setEditingItem(m);
+                filteredMedia.map((m) => {
+                  const isVideo = m.mime_type?.includes("video") || m.public_url?.endsWith(".mp4") || m.public_url?.endsWith(".webm");
+                  const isCopied = copiedId === m.id;
+
+                  return (
+                    <tr key={m.id}>
+                      <td>
+                        <div
+                          style={{
+                            width: "48px",
+                            height: "48px",
+                            borderRadius: "8px",
+                            border: "1px solid var(--line)",
+                            background: "var(--surface-raised)",
+                            overflow: "hidden",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
                           }}
-                          type="button"
                         >
-                          <Edit2 size={13} /> Edit
-                        </button>
-                        <form action={deleteAction}>
-                          <input name="id" type="hidden" value={m.id} />
-                          <button className="button button-small button-danger" disabled={deletePending} type="submit">
-                            <Trash2 size={13} />
+                          {isVideo ? (
+                            <div title="Video asset" style={{ color: "#dfb15b", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                              <Video size={22} />
+                            </div>
+                          ) : m.public_url?.startsWith("http") || m.public_url?.startsWith("/") ? (
+                            /* eslint-disable-next-line @next/next/no-img-element */
+                            <img
+                              alt={m.alt_text || m.file_name}
+                              src={m.public_url}
+                              style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                              onError={(e) => {
+                                (e.currentTarget as HTMLElement).style.display = "none";
+                              }}
+                            />
+                          ) : (
+                            <ImageIcon color="var(--text-muted)" size={20} />
+                          )}
+                        </div>
+                      </td>
+                      <td>
+                        <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                          <strong>{m.file_name}</strong>
+                          <div style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "11px", color: "var(--text-muted)" }}>
+                            <span>{formatMediaBytes(m.file_size_bytes)}</span>
+                            <span>•</span>
+                            <span>{m.mime_type || "image/jpeg"}</span>
+                          </div>
+                          <small style={{ wordBreak: "break-all", opacity: 0.8 }}>{m.public_url}</small>
+                        </div>
+                      </td>
+                      <td>
+                        <span className="record-status" style={{ textTransform: "uppercase" }}>{m.category || "general"}</span>
+                      </td>
+                      <td>
+                        <small style={{ color: m.alt_text ? "var(--text-primary)" : "var(--text-muted)" }}>
+                          {m.alt_text || "—"}
+                        </small>
+                      </td>
+                      <td>
+                        <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                          <button
+                            className="button button-small button-secondary"
+                            onClick={() => handleCopyUrl(m.id, m.public_url)}
+                            title="Copy Public URL to Clipboard"
+                            type="button"
+                          >
+                            {isCopied ? <Check color="#22c55e" size={13} /> : <Copy size={13} />}
+                            {isCopied ? "Copied" : "Copy"}
                           </button>
-                        </form>
-                      </div>
-                    </td>
-                  </tr>
-                ))
+                          <button
+                            className="button button-small button-secondary"
+                            onClick={() => {
+                              setIsCreating(false);
+                              setEditingItem(m);
+                            }}
+                            title="Edit Media Metadata"
+                            type="button"
+                          >
+                            <Edit2 size={13} />
+                          </button>
+                          <form action={deleteAction}>
+                            <input name="id" type="hidden" value={m.id} />
+                            <button
+                              className="button button-small button-danger"
+                              disabled={deletePending}
+                              title="Delete Asset"
+                              type="submit"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </form>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>

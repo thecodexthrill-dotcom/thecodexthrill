@@ -174,7 +174,7 @@ export function classifyOrganizationDeleteDatabaseError(
     return `Permanent deletion of "${organizationName}" is blocked by PostgreSQL foreign-key constraint (23503) because concurrent operational or membership records still reference this organization.`;
   }
 
-  return `Supabase rejected organization deletion (${code}). Verify that no dependent operational records exist and retry.`;
+  return `The database rejected organization deletion (${code}). Verify that no dependent operational records exist and retry.`;
 }
 
 export function validateOrganizationDeleteConfirmation(params: {

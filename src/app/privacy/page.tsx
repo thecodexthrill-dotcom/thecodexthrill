@@ -55,7 +55,7 @@ export default function PrivacyPage() {
 
           <h2>4. Client Data Isolation and Security Architecture</h2>
           <p>
-            All client tenant data is protected by PostgreSQL Row-Level Security (RLS) in our Supabase Cloud infrastructure. Organization records, memberships, projects, and documents are strictly compartmentalized by organization identifiers. Staff access is bounded by explicit role-based access controls (RBAC) and audited.
+            All client tenant data is protected by PostgreSQL Row-Level Security (RLS) in our cloud infrastructure. Organization records, memberships, projects, and documents are strictly compartmentalized by organization identifiers. Staff access is bounded by explicit role-based access controls (RBAC) and audited.
           </p>
 
           <h2>5. Data Retention and Erasure</h2>
@@ -65,7 +65,7 @@ export default function PrivacyPage() {
 
           <h2>6. Third-Party Infrastructure</h2>
           <p>
-            Our core platform is hosted on enterprise cloud providers: Vercel for application delivery and edge network routing, and Supabase Cloud (AWS) for database, authentication, and encrypted storage. All data is encrypted in transit using TLS 1.3/1.2 and encrypted at rest using AES-256.
+            Our core platform is hosted on Tier-1 enterprise cloud providers for application delivery, edge routing, managed database services, enterprise authentication, and encrypted storage. All data is encrypted in transit using TLS 1.3/1.2 and encrypted at rest using AES-256.
           </p>
 
           <h2>7. Contact and Rights Inquiries</h2>

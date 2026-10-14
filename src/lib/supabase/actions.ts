@@ -81,7 +81,7 @@ export async function requestPasswordResetAction(
     redirectTo: passwordRecoveryRedirectTo(appBase),
   });
   if (error) return { error: "Could not submit the recovery request. Check the connection and try again." };
-  return { message: "Supabase accepted the recovery request. Check your inbox and spam folder for the reset link." };
+  return { message: "The password recovery request has been accepted. Check your inbox and spam folder for the reset link." };
 }
 
 export async function updatePasswordAction(
@@ -248,7 +248,7 @@ export async function inviteUserAction(
     if (linkError) console.error("[auth.invitation] Auth user linkage failed", { code: safeInvitationListErrorCode(linkError.code) });
   }
   revalidatePath("/admin/team");
-  return { message: `Supabase accepted the invitation email request for the ${parsed.data.role.replaceAll("_", " ")} role. Email delivery is handled by Supabase Auth and is not confirmed by this response. The invitation expires in one hour and is single-use.` };
+  return { message: `The invitation email request was accepted for the ${parsed.data.role.replaceAll("_", " ")} role. The invitation expires in one hour and is single-use.` };
 }
 
 export async function resendPlatformInvitationAction(_previousState: AuthActionState, formData: FormData): Promise<AuthActionState> {
@@ -278,11 +278,11 @@ export async function resendPlatformInvitationAction(_previousState: AuthActionS
   }
   if ((error && !invitation) || !invitation?.id || !invitation.email || !invitation.role) {
     if (error) console.error("[admin.team.invitations] resend RPC failed", { code: safeInvitationListErrorCode(error.code) });
-    return { error: error ? `Supabase rejected the resend request (reference ${safeInvitationListErrorCode(error.code)}). Verify your Super Admin or Platform Admin access and MFA, then retry.` : "The invitation could not be rotated. It may no longer be pending or your role may not authorize it." };
+    return { error: error ? `The request to resend the invitation was rejected (reference ${safeInvitationListErrorCode(error.code)}). Verify your Super Admin or Platform Admin access and MFA, then retry.` : "The invitation could not be rotated. It may no longer be pending or your role may not authorize it." };
   }
   let admin;
   try { admin = createAdminClient(); }
-  catch { await supabase.rpc("revoke_platform_invitation", { p_invitation_id: invitation.id }); return { error: "The server-only Supabase credential is unavailable; the new invitation was revoked." }; }
+  catch { await supabase.rpc("revoke_platform_invitation", { p_invitation_id: invitation.id }); return { error: "The server security credential is unavailable; the new invitation was revoked." }; }
   let invitedUser = null;
   for (let page = 1; page <= 100; page += 1) {
     const { data: users, error: lookupError } = await admin.auth.admin.listUsers({ page, perPage: 1000 });
@@ -300,7 +300,7 @@ export async function resendPlatformInvitationAction(_previousState: AuthActionS
   const { data: resentUser, error: sendError } = await admin.auth.admin.inviteUserByEmail(invitation.email, { redirectTo });
   if (sendError) {
     await supabase.rpc("revoke_platform_invitation", { p_invitation_id: invitation.id });
-    console.error("[auth.invitation] Supabase Auth rejected invitation resend", {
+    console.error("[auth.invitation] Auth rejected invitation resend", {
       code: safeInvitationEmailCode(sendError.code),
       status: sendError.status ?? null,
     });
@@ -314,7 +314,7 @@ export async function resendPlatformInvitationAction(_previousState: AuthActionS
     if (linkError) console.error("[auth.invitation] Auth user linkage failed after resend", { code: safeInvitationListErrorCode(linkError.code) });
   }
   revalidatePath("/admin/team");
-  return { message: `Supabase accepted a fresh invitation email request for the existing ${invitation.role.replaceAll("_", " ")} account. Email delivery is handled by Supabase Auth and is not confirmed by this response.` };
+  return { message: `A fresh invitation email request was accepted for the existing ${invitation.role.replaceAll("_", " ")} account.` };
  }
 
 export async function revokePlatformInvitationAction(_previousState: AuthActionState, formData: FormData): Promise<AuthActionState> {
@@ -326,7 +326,7 @@ export async function revokePlatformInvitationAction(_previousState: AuthActionS
   const { data, error } = await supabase.rpc("revoke_platform_invitation", { p_invitation_id: parsed.data });
   if (error) {
     console.error("[admin.team.invitations] revoke RPC failed", { code: safeInvitationListErrorCode(error.code) });
-    return { error: "Supabase rejected the revoke request (reference " + safeInvitationListErrorCode(error.code) + "). Verify your Super Admin or Platform Admin access and MFA, then retry." };
+    return { error: "The request to revoke the invitation was rejected (reference " + safeInvitationListErrorCode(error.code) + "). Verify your Super Admin or Platform Admin access and MFA, then retry." };
   }
   if (data !== true) return { error: "This invitation is no longer pending, so it was not revoked." };
   revalidatePath("/admin/team");
@@ -342,7 +342,7 @@ export async function archivePlatformInvitationAction(_previousState: AuthAction
   const { data, error } = await supabase.rpc("archive_platform_invitation", { p_invitation_id: parsed.data });
   if (error) {
     console.error("[admin.team.invitations] archive RPC failed", { code: safeInvitationListErrorCode(error.code) });
-    return { error: "Supabase rejected the archive request (reference " + safeInvitationListErrorCode(error.code) + "). Verify your administrator access and MFA, then retry." };
+    return { error: "The request to archive the invitation was rejected (reference " + safeInvitationListErrorCode(error.code) + "). Verify your administrator access and MFA, then retry." };
   }
   if (data !== true) return { error: "Only expired, accepted, or revoked invitation records can be archived." };
   revalidatePath("/admin/team");
@@ -416,7 +416,7 @@ export async function removeAuthenticatorFactorAction(
     supabase.auth.mfa.getAuthenticatorAssuranceLevel(),
     supabase.auth.mfa.listFactors(),
   ]);
-  if (assuranceError || factorsError || !factors) return { error: "Supabase could not verify your account security state." };
+  if (assuranceError || factorsError || !factors) return { error: "Could not verify your account security state." };
   if (assurance?.currentLevel !== "aal2") return { error: "Verify an enrolled authenticator before changing account security." };
 
   const verifiedFactors = factors.totp.filter((factor) => factor.status === "verified");
@@ -424,7 +424,7 @@ export async function removeAuthenticatorFactorAction(
   if (!verifiedFactors.some((factor) => factor.id === factorId.data)) return { error: "That verified authenticator was not found on your account." };
 
   const { error } = await supabase.auth.mfa.unenroll({ factorId: factorId.data });
-  if (error) return { error: "Supabase could not remove that authenticator. No other factor was changed." };
+  if (error) return { error: "Could not remove that authenticator. No other factor was changed." };
   revalidatePath("/account/security");
   revalidatePath("/mfa");
   return { message: "Authenticator removed. At least one verified factor remains active." };
@@ -629,7 +629,7 @@ export async function permanentlyDeleteUserAction(
   revalidatePath("/admin/audit-logs");
   revalidatePath("/admin/analytics");
   return {
-    message: result.message ?? "User permanently deleted from Supabase Auth.",
+    message: result.message ?? "User permanently removed from platform authentication.",
     deletedUserId: result.deletedUserId ?? parsed.data.targetUserId,
     timestamp: new Date().toISOString(),
   };
