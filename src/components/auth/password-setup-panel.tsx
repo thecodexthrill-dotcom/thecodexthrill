@@ -2,7 +2,6 @@
 
 import { useActionState, useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { ArrowLeft, ArrowRight, Eye, EyeOff, ShieldCheck } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -19,7 +18,6 @@ export function PasswordSetupPanel({ sessionValid, linkStatus, sessionUnavailabl
   const [clientError, setClientError] = useState("");
   const [clientVerified, setClientVerified] = useState(false);
   const [verifyingLink, setVerifyingLink] = useState(false);
-  const router = useRouter();
 
   useEffect(() => {
     function handleRecoverySession(event: Event) {
@@ -37,9 +35,9 @@ export function PasswordSetupPanel({ sessionValid, linkStatus, sessionUnavailabl
 
   useEffect(() => {
     if (!state.passwordUpdated) return;
-    const timeout = window.setTimeout(() => router.replace("/auth/continue"), 1400);
+    const timeout = window.setTimeout(() => window.location.replace("/auth/continue"), 1400);
     return () => window.clearTimeout(timeout);
-  }, [router, state.passwordUpdated]);
+  }, [state.passwordUpdated]);
 
   const lengthValid = password.length >= 12;
   const confirmationMatches = confirmation.length > 0 && password === confirmation;

@@ -134,12 +134,16 @@ export async function WorkspaceContent({
 
   if (kind === "portal" && key === "overview") {
     const supabase = await createClient();
-    const [authRes, membershipsRes, projectsRes, tasksRes, docsRes, invoicesRes, ticketsRes] = await Promise.all([
+    const [authRes, membershipsRes, orgRolesRes, projectsRes, tasksRes, docsRes, invoicesRes, ticketsRes] = await Promise.all([
       supabase.auth.getUser(),
       supabase
         .from("organization_memberships")
-        .select("organization_id, role, status, organizations(id, name, status)")
+        .select("organization_id, status, organizations(id, name, status)")
         .eq("status", "active"),
+      supabase
+        .from("organization_role_assignments")
+        .select("organization_id, role")
+        .is("revoked_at", null),
       supabase
         .from("tenant_projects")
         .select("id, organization_id, name, description, status, progress_pct, target_date")
@@ -161,6 +165,8 @@ export async function WorkspaceContent({
 
     const currentUserId = authRes.data.user?.id ?? null;
     const memberships = membershipsRes.data ?? [];
+    const orgRoles = orgRolesRes.data ?? [];
+    const roleByOrgId = new Map(orgRoles.map((r) => [r.organization_id, r.role]));
     const allowedOrgIds = new Set(memberships.map((m) => m.organization_id));
 
     const portalProjects = (projectsRes.data ?? [])
@@ -287,11 +293,12 @@ export async function WorkspaceContent({
               <tbody>
                 {memberships.map((m) => {
                   const org = Array.isArray(m.organizations) ? m.organizations[0] : m.organizations;
+                  const role = roleByOrgId.get(m.organization_id) ?? "client_member";
                   return (
                     <tr key={m.organization_id}>
                       <td><strong>{org?.name ?? "Organization"}</strong></td>
                       <td><span className="record-status">{org?.status ?? m.status}</span></td>
-                      <td style={{ textTransform: "capitalize" }}>{(m.role ?? "member").replaceAll("_", " ")}</td>
+                      <td style={{ textTransform: "capitalize" }}>{role.replaceAll("_", " ")}</td>
                     </tr>
                   );
                 })}

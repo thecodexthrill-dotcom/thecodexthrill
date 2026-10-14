@@ -51,6 +51,12 @@ test("Super Admin sees lifecycle and resend fields; Platform Admin cannot manage
   assert.ok(migration.includes("Only the Super Admin may revoke a Platform Admin invitation"));
 });
 
+import { mapClientInviteRoleToOrganizationRole } from "./invitation-fallback-service.ts";
+
+const fallbackService = readFileSync("src/lib/supabase/invitation-fallback-service.ts", "utf8");
+const leadActions = readFileSync("src/lib/supabase/lead-actions.ts", "utf8");
+const userManagementService = readFileSync("src/lib/supabase/user-management-service.ts", "utf8");
+
 test("invitation read and mutation functions retain AAL2 admin authorization and private table access", () => {
   assert.ok(migration.includes("auth.jwt() ->> 'aal'"));
   assert.ok(migration.includes("'aal2'"));
@@ -59,3 +65,24 @@ test("invitation read and mutation functions retain AAL2 admin authorization and
   assert.ok(migration.includes("grant execute on function public.get_auth_invitation_status() to authenticated"));
   assert.ok(callback.includes("isInvitationCallback({ code, tokenHash, otpType, next })"));
 });
+
+test("organization invitation provisioning and acceptance align with canonical profiles, organization_memberships, and organization_role_assignments columns", () => {
+  assert.equal(mapClientInviteRoleToOrganizationRole("client_owner"), "organization_owner");
+  assert.equal(mapClientInviteRoleToOrganizationRole("client_manager"), "organization_admin");
+  assert.equal(mapClientInviteRoleToOrganizationRole("client_collaborator"), "project_manager");
+  assert.equal(mapClientInviteRoleToOrganizationRole("client_viewer"), "client_member");
+
+  assert.ok(!fallbackService.includes("invited_by: fallbackState.invitedBy"));
+  assert.ok(fallbackService.includes("created_by: actorProfileId"));
+  assert.ok(fallbackService.includes('"organization.invitation.accepted"'));
+  assert.ok(fallbackService.includes('"organization.invitation.revoked"'));
+  assert.ok(fallbackService.includes('"organization.invitation.expired"'));
+
+  assert.ok(!leadActions.includes("granted_by:"));
+  assert.ok(leadActions.includes("created_by: params.actorUserId"));
+  assert.ok(leadActions.includes("assigned_by: params.actorUserId"));
+
+  assert.ok(userManagementService.includes('admin.from("profiles").select("id, display_name, created_at")'));
+  assert.ok(!userManagementService.includes('admin.from("profiles").select("id, email, display_name, created_at")'));
+});
+

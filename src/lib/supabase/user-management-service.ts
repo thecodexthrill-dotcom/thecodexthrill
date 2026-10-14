@@ -161,7 +161,7 @@ export async function loadSuperAdminUserDirectory(options: {
     inviteAuditRes,
     factorsByUserId,
   ] = await Promise.all([
-    admin.from("profiles").select("id, email, display_name, created_at"),
+    admin.from("profiles").select("id, display_name, created_at"),
     admin
       .from("platform_super_admin_designation")
       .select("slot, user_id, designated_by"),
@@ -186,10 +186,10 @@ export async function loadSuperAdminUserDirectory(options: {
 
   const profileById = new Map<
     string,
-    { email: string; display_name: string | null }
+    { email?: string; display_name: string | null }
   >();
   for (const p of profilesRes.data ?? []) {
-    profileById.set(p.id, { email: p.email, display_name: p.display_name });
+    profileById.set(p.id, { display_name: p.display_name });
   }
 
   const superAdminSet = new Set<string>();

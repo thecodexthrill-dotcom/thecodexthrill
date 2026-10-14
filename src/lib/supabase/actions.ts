@@ -149,7 +149,7 @@ export async function acceptInvitationAction(
   const isInviteSession = hasAuthFlowMethod(claims?.amr, "invite") && hasFreshInvitationSession(handoffSubject, claims?.sub, claims?.amr);
   const { data: invitationValid, error: invitationError } = await supabase.rpc("has_valid_auth_invitation");
   const { data: platformInvitation } = await supabase.rpc("has_valid_platform_invitation");
-  const fallbackState = (!claimsError && claims?.sub && isInviteSession && (invitationError || invitationValid !== true))
+  const fallbackState = (!claimsError && claims?.sub && isInviteSession && (invitationError || invitationValid !== true || platformInvitation !== true))
     ? await resolveVerifiedInvitationState({
         userId: claims.sub,
         rpcStatus: !invitationError && invitationValid === true ? "valid" : null,
@@ -159,7 +159,7 @@ export async function acceptInvitationAction(
     !claimsError &&
       claims?.sub &&
       isInviteSession &&
-      ((!invitationError && invitationValid === true) || fallbackState?.invitationVerified),
+      ((!invitationError && invitationValid === true && platformInvitation === true) || fallbackState?.invitationVerified),
   );
   if (!canProceed) return { error: "Open the latest valid invitation link and use its Continue button before setting the password." };
   const { error: passwordError } = await supabase.auth.updateUser({ password: parsed.data.password });

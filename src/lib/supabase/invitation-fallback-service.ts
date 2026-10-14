@@ -178,6 +178,32 @@ export interface VerifiedInvitationFallbackState {
   organizationRole?: string;
 }
 
+export type CanonicalOrganizationRole =
+  | "organization_owner"
+  | "organization_admin"
+  | "project_manager"
+  | "client_member";
+
+export function mapClientInviteRoleToOrganizationRole(
+  role?: string | null,
+): CanonicalOrganizationRole {
+  switch (role) {
+    case "client_owner":
+    case "organization_owner":
+      return "organization_owner";
+    case "client_manager":
+    case "organization_admin":
+      return "organization_admin";
+    case "client_collaborator":
+    case "project_manager":
+      return "project_manager";
+    case "client_viewer":
+    case "client_member":
+    default:
+      return "client_member";
+  }
+}
+
 /**
  * Resolves whether an authenticated invite session is authorized to complete password setup,
  * falling back to `auth.users` + `audit_events` + `organization_memberships` when the database RPC
@@ -190,7 +216,7 @@ export async function resolveVerifiedInvitationState(options: {
   adminClientOverride?: SupabaseClient;
 }): Promise<VerifiedInvitationFallbackState> {
   const { userId, rpcStatus } = options;
-  if (rpcStatus === "pending" || rpcStatus === "valid") {
+  if (rpcStatus === "pending") {
     return {
       invitationVerified: true,
       status: rpcStatus,
@@ -209,6 +235,9 @@ export async function resolveVerifiedInvitationState(options: {
   try {
     admin = await resolveAdminClient(options.adminClientOverride);
   } catch {
+    if (rpcStatus === "valid") {
+      return { invitationVerified: true, status: "valid", source: "rpc" };
+    }
     return { invitationVerified: false, status: "invalid", source: "none" };
   }
 
@@ -242,12 +271,18 @@ export async function resolveVerifiedInvitationState(options: {
       .is("revoked_at", null),
     admin
       .from("organization_memberships")
-      .select("organization_id, status")
+      .select("organization_id, status, created_by")
       .eq("user_id", userId),
     admin
       .from("audit_events")
       .select("id, occurred_at, actor_user_id, action, target_type, target_id, details")
-      .in("action", ["organization.member_invited", "lead.converted_to_client"])
+      .in("action", [
+        "organization.member_invited",
+        "lead.converted_to_client",
+        "organization.invitation.accepted",
+        "organization.invitation.revoked",
+        "organization.invitation.expired",
+      ])
       .order("occurred_at", { ascending: false })
       .limit(200),
   ]);
@@ -344,17 +379,9 @@ export async function resolveVerifiedInvitationState(options: {
     };
   }
 
-  // Check if invited via Client Portal Onboarding
+  // Check Client Portal organization invitation audit events first so accepted/revoked/expired
+  // states and invited role metadata take precedence.
   const activeOrgMembership = (orgMemberRes.data ?? []).find((m) => m.status === "active");
-  if (activeOrgMembership) {
-    return {
-      invitationVerified: true,
-      status: "valid",
-      source: "organization_invite_fallback",
-      email,
-      organizationId: activeOrgMembership.organization_id,
-    };
-  }
 
   for (const raw of (orgInviteAuditRes.data ?? []) as AuditInvitationEvent[]) {
     const details = raw.details ?? {};
@@ -364,24 +391,91 @@ export async function resolveVerifiedInvitationState(options: {
         : typeof details.client_email === "string"
           ? details.client_email.toLowerCase().trim()
           : "";
-    if (invitedEmail === email) {
-      const orgId =
-        typeof details.organization_id === "string"
-          ? details.organization_id
-          : raw.target_type === "organizations" && typeof raw.target_id === "string"
-            ? raw.target_id
-            : undefined;
-      const orgRole = typeof details.role === "string" ? details.role : "client_owner";
+    if (invitedEmail !== email) continue;
+
+    const orgId =
+      typeof details.organization_id === "string"
+        ? details.organization_id
+        : raw.target_type === "organizations" && typeof raw.target_id === "string"
+          ? raw.target_id
+          : activeOrgMembership?.organization_id;
+    const orgRole = typeof details.role === "string" ? details.role : "client_owner";
+
+    if (raw.action === "organization.invitation.accepted") {
       return {
-        invitationVerified: true,
-        status: "valid",
+        invitationVerified: false,
+        status: "accepted",
         source: "organization_invite_fallback",
         email,
-        invitedBy: raw.actor_user_id ?? null,
         organizationId: orgId,
         organizationRole: orgRole,
       };
     }
+    if (raw.action === "organization.invitation.revoked") {
+      return {
+        invitationVerified: false,
+        status: "revoked",
+        source: "organization_invite_fallback",
+        email,
+        organizationId: orgId,
+        organizationRole: orgRole,
+      };
+    }
+    if (raw.action === "organization.invitation.expired") {
+      return {
+        invitationVerified: false,
+        status: "expired",
+        source: "organization_invite_fallback",
+        email,
+        organizationId: orgId,
+        organizationRole: orgRole,
+      };
+    }
+
+    const expiresAtIso =
+      typeof details.expires_at === "string"
+        ? details.expires_at
+        : new Date(new Date(raw.occurred_at).getTime() + 24 * 60 * 60 * 1000).toISOString();
+    if (new Date(expiresAtIso).getTime() <= Date.now()) {
+      return {
+        invitationVerified: false,
+        status: "expired",
+        source: "organization_invite_fallback",
+        email,
+        organizationId: orgId,
+        organizationRole: orgRole,
+      };
+    }
+
+    return {
+      invitationVerified: true,
+      status: "valid",
+      source: "organization_invite_fallback",
+      email,
+      invitedBy: raw.actor_user_id ?? activeOrgMembership?.created_by ?? null,
+      organizationId: orgId,
+      organizationRole: orgRole,
+    };
+  }
+
+  if (activeOrgMembership) {
+    return {
+      invitationVerified: true,
+      status: "valid",
+      source: "organization_invite_fallback",
+      email,
+      invitedBy: activeOrgMembership.created_by ?? null,
+      organizationId: activeOrgMembership.organization_id,
+    };
+  }
+
+  if (rpcStatus === "valid") {
+    return {
+      invitationVerified: true,
+      status: "valid",
+      source: "rpc",
+      email,
+    };
   }
 
   const metaRole =
@@ -438,19 +532,31 @@ export async function completeInvitationAcceptanceFallback(options: {
     return { ok: false, error: "Server-only Supabase admin client is unavailable." };
   }
 
+  const defaultDisplayName = (fallbackState.email ?? "Member").split("@")[0] || "Member";
+
   if (
     fallbackState.source === "platform_audit_fallback" &&
     fallbackState.role &&
     ["platform_admin", "developer", "support_staff"].includes(fallbackState.role)
   ) {
-    // Ensure profile exists for userId
-    if (fallbackState.email) {
-      await admin
+    // Ensure profile exists for userId using canonical public.profiles columns
+    await admin
+      .from("profiles")
+      .upsert(
+        { id: userId, display_name: defaultDisplayName },
+        { onConflict: "id", ignoreDuplicates: true },
+      );
+
+    let assignedByUserId = userId;
+    if (fallbackState.invitedBy) {
+      const { data: inviterProfile } = await admin
         .from("profiles")
-        .upsert(
-          { id: userId, email: fallbackState.email },
-          { onConflict: "id", ignoreDuplicates: true },
-        );
+        .select("id")
+        .eq("id", fallbackState.invitedBy)
+        .maybeSingle();
+      if (inviterProfile?.id) {
+        assignedByUserId = inviterProfile.id;
+      }
     }
 
     const { data: existingRole } = await admin
@@ -467,7 +573,7 @@ export async function completeInvitationAcceptanceFallback(options: {
         .insert({
           user_id: userId,
           role: fallbackState.role,
-          assigned_by: fallbackState.invitedBy ?? userId,
+          assigned_by: assignedByUserId,
         });
       if (insertErr) {
         logSanitizedOperationalEvent({
@@ -499,51 +605,112 @@ export async function completeInvitationAcceptanceFallback(options: {
   }
 
   if (fallbackState.source === "organization_invite_fallback" && fallbackState.organizationId) {
-    const mappedOrgRole =
-      fallbackState.organizationRole === "client_owner"
-        ? "organization_owner"
-        : fallbackState.organizationRole === "client_manager"
-          ? "organization_admin"
-          : fallbackState.organizationRole === "client_collaborator"
-            ? "project_manager"
-            : "client_member";
+    const mappedOrgRole = mapClientInviteRoleToOrganizationRole(fallbackState.organizationRole);
 
-    if (fallbackState.email) {
-      await admin
-        .from("profiles")
-        .upsert(
-          { id: userId, email: fallbackState.email },
-          { onConflict: "id", ignoreDuplicates: true },
-        );
+    const { error: profileErr } = await admin
+      .from("profiles")
+      .upsert(
+        { id: userId, display_name: defaultDisplayName },
+        { onConflict: "id", ignoreDuplicates: true },
+      );
+    if (profileErr) {
+      logSanitizedOperationalEvent({
+        level: "error",
+        scope: "auth.invitation_fallback",
+        action: "org_profile_upsert_failed",
+        message: "Failed to provision user profile during organization invitation acceptance",
+        metadata: { code: profileErr.code },
+      });
+      return { ok: false, error: "Could not initialize user profile for organization membership." };
     }
 
-    await admin.from("organization_memberships").upsert(
+    let actorProfileId = userId;
+    if (fallbackState.invitedBy) {
+      const { data: inviterProfile } = await admin
+        .from("profiles")
+        .select("id")
+        .eq("id", fallbackState.invitedBy)
+        .maybeSingle();
+      if (inviterProfile?.id) {
+        actorProfileId = inviterProfile.id;
+      }
+    }
+
+    const { error: membershipErr } = await admin.from("organization_memberships").upsert(
       {
         organization_id: fallbackState.organizationId,
         user_id: userId,
         status: "active",
-        invited_by: fallbackState.invitedBy ?? userId,
+        created_by: actorProfileId,
       },
       { onConflict: "organization_id,user_id" },
     );
+    if (membershipErr) {
+      logSanitizedOperationalEvent({
+        level: "error",
+        scope: "auth.invitation_fallback",
+        action: "org_membership_upsert_failed",
+        message: "Failed to upsert organization membership during invitation acceptance",
+        metadata: { code: membershipErr.code },
+      });
+      return { ok: false, error: "Could not activate organization membership." };
+    }
 
     const { data: existingOrgRole } = await admin
       .from("organization_role_assignments")
-      .select("id")
+      .select("id, role")
       .eq("organization_id", fallbackState.organizationId)
       .eq("user_id", userId)
-      .eq("role", mappedOrgRole)
       .is("revoked_at", null)
       .maybeSingle();
 
     if (!existingOrgRole) {
-      await admin.from("organization_role_assignments").insert({
+      const { error: roleInsertErr } = await admin.from("organization_role_assignments").insert({
         organization_id: fallbackState.organizationId,
         user_id: userId,
         role: mappedOrgRole,
-        assigned_by: fallbackState.invitedBy ?? userId,
+        assigned_by: actorProfileId,
       });
+      if (roleInsertErr) {
+        logSanitizedOperationalEvent({
+          level: "error",
+          scope: "auth.invitation_fallback",
+          action: "org_role_insert_failed",
+          message: "Failed to assign organization role during invitation acceptance",
+          metadata: { code: roleInsertErr.code },
+        });
+        return { ok: false, error: "Could not assign organization role." };
+      }
+    } else if (existingOrgRole.role !== mappedOrgRole) {
+      const { error: roleUpdateErr } = await admin
+        .from("organization_role_assignments")
+        .update({ role: mappedOrgRole, assigned_by: actorProfileId })
+        .eq("id", existingOrgRole.id);
+      if (roleUpdateErr) {
+        logSanitizedOperationalEvent({
+          level: "error",
+          scope: "auth.invitation_fallback",
+          action: "org_role_update_failed",
+          message: "Failed to update organization role during invitation acceptance",
+          metadata: { code: roleUpdateErr.code },
+        });
+        return { ok: false, error: "Could not update organization role." };
+      }
     }
+
+    await admin.from("audit_events").insert({
+      actor_user_id: userId,
+      scope: "platform",
+      action: "organization.invitation.accepted",
+      target_type: "organizations",
+      target_id: fallbackState.organizationId,
+      details: {
+        email: fallbackState.email,
+        organization_id: fallbackState.organizationId,
+        role: mappedOrgRole,
+      },
+    });
+
     return { ok: true };
   }
 

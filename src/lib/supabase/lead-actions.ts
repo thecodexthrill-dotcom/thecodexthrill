@@ -262,10 +262,18 @@ async function provisionClientOrganizationMember(params: {
   role: "client_owner" | "client_manager" | "client_collaborator" | "client_viewer";
   actorUserId: string;
 }) {
+  const mappedOrgRole =
+    params.role === "client_owner"
+      ? "organization_owner"
+      : params.role === "client_manager"
+        ? "organization_admin"
+        : params.role === "client_collaborator"
+          ? "project_manager"
+          : "client_member";
+
   await params.adminClient.from("profiles").upsert(
     {
       id: params.invitedUserId,
-      email: params.email,
       display_name: params.email.split("@")[0] ?? "Client Member",
     },
     { onConflict: "id" },
@@ -276,20 +284,35 @@ async function provisionClientOrganizationMember(params: {
       organization_id: params.organizationId,
       user_id: params.invitedUserId,
       status: "active",
-      role: params.role,
+      created_by: params.actorUserId,
     },
     { onConflict: "organization_id,user_id" },
   );
 
-  await params.adminClient.from("organization_role_assignments").upsert(
-    {
+  const { data: existingOrgRole } = await params.adminClient
+    .from("organization_role_assignments")
+    .select("id, role")
+    .eq("organization_id", params.organizationId)
+    .eq("user_id", params.invitedUserId)
+    .is("revoked_at", null)
+    .maybeSingle();
+
+  if (!existingOrgRole) {
+    await params.adminClient.from("organization_role_assignments").insert({
       organization_id: params.organizationId,
       user_id: params.invitedUserId,
-      role: params.role,
-      granted_by: params.actorUserId,
-    },
-    { onConflict: "organization_id,user_id,role" },
-  );
+      role: mappedOrgRole,
+      assigned_by: params.actorUserId,
+    });
+  } else if (existingOrgRole.role !== mappedOrgRole) {
+    await params.adminClient
+      .from("organization_role_assignments")
+      .update({
+        role: mappedOrgRole,
+        assigned_by: params.actorUserId,
+      })
+      .eq("id", existingOrgRole.id);
+  }
 }
 
 const convertLeadSchema = z.object({
