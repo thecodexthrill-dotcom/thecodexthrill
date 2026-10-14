@@ -73,14 +73,18 @@ test("organization invitation provisioning and acceptance align with canonical p
   assert.equal(mapClientInviteRoleToOrganizationRole("client_viewer"), "client_member");
 
   assert.ok(!fallbackService.includes("invited_by: fallbackState.invitedBy"));
-  assert.ok(fallbackService.includes("created_by: actorProfileId"));
+  assert.ok(fallbackService.includes('"provision_organization_membership"'));
+  assert.ok(fallbackService.includes("p_actor_user_id: actorProfileId"));
+  assert.ok(!fallbackService.includes('admin.from("organization_memberships").upsert'));
   assert.ok(fallbackService.includes('"organization.invitation.accepted"'));
   assert.ok(fallbackService.includes('"organization.invitation.revoked"'));
   assert.ok(fallbackService.includes('"organization.invitation.expired"'));
 
   assert.ok(!leadActions.includes("granted_by:"));
-  assert.ok(leadActions.includes("created_by: params.actorUserId"));
-  assert.ok(leadActions.includes("assigned_by: params.actorUserId"));
+  assert.ok(leadActions.includes('"provision_organization_membership"'));
+  assert.ok(leadActions.includes("p_actor_user_id: params.actorUserId"));
+  assert.ok(!leadActions.includes('params.adminClient.from("organization_memberships").upsert'));
+
 
   assert.ok(userManagementService.includes('admin.from("profiles").select("id, display_name, created_at")'));
   assert.ok(!userManagementService.includes('admin.from("profiles").select("id, email, display_name, created_at")'));

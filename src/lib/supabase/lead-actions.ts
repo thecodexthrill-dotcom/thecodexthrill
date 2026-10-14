@@ -271,47 +271,15 @@ async function provisionClientOrganizationMember(params: {
           ? "project_manager"
           : "client_member";
 
-  await params.adminClient.from("profiles").upsert(
-    {
-      id: params.invitedUserId,
-      display_name: params.email.split("@")[0] ?? "Client Member",
-    },
-    { onConflict: "id" },
-  );
-
-  await params.adminClient.from("organization_memberships").upsert(
-    {
-      organization_id: params.organizationId,
-      user_id: params.invitedUserId,
-      status: "active",
-      created_by: params.actorUserId,
-    },
-    { onConflict: "organization_id,user_id" },
-  );
-
-  const { data: existingOrgRole } = await params.adminClient
-    .from("organization_role_assignments")
-    .select("id, role")
-    .eq("organization_id", params.organizationId)
-    .eq("user_id", params.invitedUserId)
-    .is("revoked_at", null)
-    .maybeSingle();
-
-  if (!existingOrgRole) {
-    await params.adminClient.from("organization_role_assignments").insert({
-      organization_id: params.organizationId,
-      user_id: params.invitedUserId,
-      role: mappedOrgRole,
-      assigned_by: params.actorUserId,
-    });
-  } else if (existingOrgRole.role !== mappedOrgRole) {
-    await params.adminClient
-      .from("organization_role_assignments")
-      .update({
-        role: mappedOrgRole,
-        assigned_by: params.actorUserId,
-      })
-      .eq("id", existingOrgRole.id);
+  const { error: rpcErr } = await params.adminClient.rpc("provision_organization_membership", {
+    p_organization_id: params.organizationId,
+    p_user_id: params.invitedUserId,
+    p_role: mappedOrgRole,
+    p_actor_user_id: params.actorUserId,
+    p_display_name: params.email.split("@")[0] ?? "Client Member",
+  });
+  if (rpcErr) {
+    throw new Error(`Failed to provision client organization member via atomic RPC: ${rpcErr.message}`);
   }
 }
 

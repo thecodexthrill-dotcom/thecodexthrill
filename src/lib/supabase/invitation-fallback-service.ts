@@ -607,23 +607,6 @@ export async function completeInvitationAcceptanceFallback(options: {
   if (fallbackState.source === "organization_invite_fallback" && fallbackState.organizationId) {
     const mappedOrgRole = mapClientInviteRoleToOrganizationRole(fallbackState.organizationRole);
 
-    const { error: profileErr } = await admin
-      .from("profiles")
-      .upsert(
-        { id: userId, display_name: defaultDisplayName },
-        { onConflict: "id", ignoreDuplicates: true },
-      );
-    if (profileErr) {
-      logSanitizedOperationalEvent({
-        level: "error",
-        scope: "auth.invitation_fallback",
-        action: "org_profile_upsert_failed",
-        message: "Failed to provision user profile during organization invitation acceptance",
-        metadata: { code: profileErr.code },
-      });
-      return { ok: false, error: "Could not initialize user profile for organization membership." };
-    }
-
     let actorProfileId = userId;
     if (fallbackState.invitedBy) {
       const { data: inviterProfile } = await admin
@@ -636,67 +619,27 @@ export async function completeInvitationAcceptanceFallback(options: {
       }
     }
 
-    const { error: membershipErr } = await admin.from("organization_memberships").upsert(
-      {
-        organization_id: fallbackState.organizationId,
-        user_id: userId,
-        status: "active",
-        created_by: actorProfileId,
-      },
-      { onConflict: "organization_id,user_id" },
-    );
-    if (membershipErr) {
+    // Atomically provision organization membership and role assignment via RPC.
+    // This satisfies the deferred constraint triggers and eliminates P0001 / 23503 partial writes.
+    const { error: rpcErr } = await admin.rpc("provision_organization_membership", {
+      p_organization_id: fallbackState.organizationId,
+      p_user_id: userId,
+      p_role: mappedOrgRole,
+      p_actor_user_id: actorProfileId,
+      p_display_name: defaultDisplayName,
+    });
+
+    if (rpcErr) {
       logSanitizedOperationalEvent({
         level: "error",
         scope: "auth.invitation_fallback",
-        action: "org_membership_upsert_failed",
-        message: "Failed to upsert organization membership during invitation acceptance",
-        metadata: { code: membershipErr.code },
+        action: "org_membership_rpc_failed",
+        message: "Failed to provision organization membership via atomic RPC",
+        metadata: { code: rpcErr.code },
       });
       return { ok: false, error: "Could not activate organization membership." };
     }
 
-    const { data: existingOrgRole } = await admin
-      .from("organization_role_assignments")
-      .select("id, role")
-      .eq("organization_id", fallbackState.organizationId)
-      .eq("user_id", userId)
-      .is("revoked_at", null)
-      .maybeSingle();
-
-    if (!existingOrgRole) {
-      const { error: roleInsertErr } = await admin.from("organization_role_assignments").insert({
-        organization_id: fallbackState.organizationId,
-        user_id: userId,
-        role: mappedOrgRole,
-        assigned_by: actorProfileId,
-      });
-      if (roleInsertErr) {
-        logSanitizedOperationalEvent({
-          level: "error",
-          scope: "auth.invitation_fallback",
-          action: "org_role_insert_failed",
-          message: "Failed to assign organization role during invitation acceptance",
-          metadata: { code: roleInsertErr.code },
-        });
-        return { ok: false, error: "Could not assign organization role." };
-      }
-    } else if (existingOrgRole.role !== mappedOrgRole) {
-      const { error: roleUpdateErr } = await admin
-        .from("organization_role_assignments")
-        .update({ role: mappedOrgRole, assigned_by: actorProfileId })
-        .eq("id", existingOrgRole.id);
-      if (roleUpdateErr) {
-        logSanitizedOperationalEvent({
-          level: "error",
-          scope: "auth.invitation_fallback",
-          action: "org_role_update_failed",
-          message: "Failed to update organization role during invitation acceptance",
-          metadata: { code: roleUpdateErr.code },
-        });
-        return { ok: false, error: "Could not update organization role." };
-      }
-    }
 
     await admin.from("audit_events").insert({
       actor_user_id: userId,
