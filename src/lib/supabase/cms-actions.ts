@@ -613,12 +613,27 @@ export async function updateCmsSiteSettingsAction(
 // 6. Hero Slides CMS Actions
 // ============================================================================
 
+async function ensureCmsMediaBucket(adminSupabase: ReturnType<typeof createAdminClient>) {
+  try {
+    const { data: buckets } = await adminSupabase.storage.listBuckets();
+    const exists = buckets?.some((b) => b.name === "cms-media" || b.id === "cms-media");
+    if (!exists) {
+      await adminSupabase.storage.createBucket("cms-media", {
+        public: true,
+        fileSizeLimit: 52428800, // 50MB
+      });
+    }
+  } catch {
+    // Non-fatal if bucket exists or permissions restrict listing
+  }
+}
+
 const heroSlideSchema = z.object({
   id: z.string().uuid().optional(),
-  title: z.string().trim().min(1).max(200),
-  label: z.string().trim().min(1).max(200),
-  tagline: z.string().trim().min(1).max(200),
-  imageUrl: z.string().trim().min(1),
+  title: z.string().trim().min(1, "Slide title is required").max(200),
+  label: z.string().trim().min(1, "Slide label is required").max(200),
+  tagline: z.string().trim().min(1, "Slide tagline is required").max(200),
+  imageUrl: z.string().trim().min(1, "Media URL or uploaded file is required"),
   altText: z.string().trim().default(""),
   linkUrl: z.string().trim().optional(),
   status: z.enum(["draft", "review", "published", "archived"]).default("published"),
@@ -642,13 +657,22 @@ export async function saveCmsHeroSlideAction(
 
     try {
       const adminSupabase = createAdminClient();
+      await ensureCmsMediaBucket(adminSupabase);
       const arrayBuffer = await uploadedFile.arrayBuffer();
       const buffer = Buffer.from(arrayBuffer);
+
+      const mimeType =
+        uploadedFile.type ||
+        (sanitizedFileName.endsWith(".mp4")
+          ? "video/mp4"
+          : sanitizedFileName.endsWith(".webm")
+            ? "video/webm"
+            : "image/jpeg");
 
       const { error: uploadErr } = await adminSupabase.storage
         .from("cms-media")
         .upload(storagePath, buffer, {
-          contentType: uploadedFile.type || "image/jpeg",
+          contentType: mimeType,
           upsert: true,
         });
 
@@ -658,11 +682,17 @@ export async function saveCmsHeroSlideAction(
           .getPublicUrl(storagePath);
         resolvedImageUrl = publicUrlData?.publicUrl || `/brand/${sanitizedFileName}`;
       } else {
-        resolvedImageUrl = resolvedImageUrl || `/brand/${sanitizedFileName}`;
+        console.error("Hero media upload failed:", uploadErr);
+        return { error: `Media upload failed: ${uploadErr.message}` };
       }
-    } catch {
-      resolvedImageUrl = resolvedImageUrl || `/brand/${sanitizedFileName}`;
+    } catch (err: unknown) {
+      console.error("Hero media upload exception:", err);
+      return { error: `Media upload exception: ${err instanceof Error ? err.message : String(err)}` };
     }
+  }
+
+  if (!resolvedImageUrl) {
+    return { error: "Please upload an image or video file, or provide a valid media URL." };
   }
 
   const raw = {
@@ -670,7 +700,7 @@ export async function saveCmsHeroSlideAction(
     title: formData.get("title"),
     label: formData.get("label"),
     tagline: formData.get("tagline"),
-    imageUrl: resolvedImageUrl || "/brand/thecodexthrill-banner.jpg",
+    imageUrl: resolvedImageUrl,
     altText: formData.get("alt_text") || "",
     linkUrl: formData.get("link_url") || undefined,
     status: formData.get("status") || "published",
@@ -1414,13 +1444,20 @@ export async function saveCmsMediaAction(
   if (file && typeof file === "object" && "size" in file && (file as File).size > 0) {
     const uploadedFile = file as File;
     fileName = fileName || uploadedFile.name;
-    mimeType = uploadedFile.type || mimeType;
+    mimeType =
+      uploadedFile.type ||
+      (uploadedFile.name.endsWith(".mp4")
+        ? "video/mp4"
+        : uploadedFile.name.endsWith(".webm")
+          ? "video/webm"
+          : mimeType);
     fileSizeBytes = uploadedFile.size;
     const sanitizedFileName = uploadedFile.name.replace(/[^a-zA-Z0-9._-]/g, "_");
     const storagePath = `cms-media/${Date.now()}-${sanitizedFileName}`;
 
     try {
       const adminSupabase = createAdminClient();
+      await ensureCmsMediaBucket(adminSupabase);
       const arrayBuffer = await uploadedFile.arrayBuffer();
       const buffer = Buffer.from(arrayBuffer);
 
@@ -1437,11 +1474,16 @@ export async function saveCmsMediaAction(
           .getPublicUrl(storagePath);
         publicUrl = publicUrlData?.publicUrl || `/brand/${sanitizedFileName}`;
       } else {
-        publicUrl = publicUrl || `/brand/${sanitizedFileName}`;
+        console.error("Storage upload error:", uploadErr);
+        return { error: `Media asset upload failed: ${uploadErr.message}` };
       }
-    } catch {
-      publicUrl = publicUrl || `/brand/${sanitizedFileName}`;
+    } catch (err: unknown) {
+      return { error: `Media asset upload exception: ${err instanceof Error ? err.message : String(err)}` };
     }
+  }
+
+  if (!publicUrl) {
+    return { error: "Please upload an asset file or provide a public URL." };
   }
 
   const raw = {

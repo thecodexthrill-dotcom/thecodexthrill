@@ -1,7 +1,7 @@
 "use client";
 
-import { useActionState, useState } from "react";
-import { Edit2, Plus, Trash2, RotateCcw, Copy, Check, Video, Image as ImageIcon } from "lucide-react";
+import { useActionState, useState, useRef, useEffect } from "react";
+import { Edit2, Plus, Trash2, RotateCcw, Copy, Check, Video, Image as ImageIcon, Upload, Link as LinkIcon, X } from "lucide-react";
 import {
   saveCmsPageAction,
   deleteCmsPageAction,
@@ -854,6 +854,466 @@ export type CmsHeroSlideRecord = {
   updated_at: string;
 };
 
+function CmsHeroSlideEditorForm({
+  editingSlide,
+  saveSlideAction,
+  saveSlidePending,
+  onCancel,
+}: {
+  editingSlide: CmsHeroSlideRecord | null;
+  saveSlideAction: (payload: FormData) => void;
+  saveSlidePending: boolean;
+  onCancel: () => void;
+}) {
+  const [uploadMode, setUploadMode] = useState<"direct" | "url">("direct");
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [manualUrl, setManualUrl] = useState<string>(editingSlide?.image_url ?? "");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
+
+  const handleFile = (file: File) => {
+    if (file.size > 52428800) {
+      alert("File size exceeds 50MB limit. Please choose a smaller media file.");
+      return;
+    }
+    setSelectedFile(file);
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setPreviewUrl(URL.createObjectURL(file));
+    if (fileInputRef.current) {
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      fileInputRef.current.files = dt.files;
+    }
+  };
+
+  const handleRemoveFile = () => {
+    setSelectedFile(null);
+    if (previewUrl) {
+      URL.revokeObjectURL(previewUrl);
+      setPreviewUrl(null);
+    }
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
+  const formatFileSize = (bytes: number): string => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  const isVideoFile =
+    selectedFile?.type.startsWith("video/") ||
+    selectedFile?.name.toLowerCase().endsWith(".mp4") ||
+    selectedFile?.name.toLowerCase().endsWith(".webm");
+
+  const existingIsVideo =
+    editingSlide?.image_url?.toLowerCase().endsWith(".mp4") ||
+    editingSlide?.image_url?.toLowerCase().endsWith(".webm") ||
+    editingSlide?.image_url?.includes("video/");
+
+  return (
+    <form
+      action={saveSlideAction}
+      className="auth-form lead-create-form"
+      encType="multipart/form-data"
+      style={{
+        marginTop: "24px",
+        marginBottom: "32px",
+        padding: "24px",
+        border: "1px solid var(--line)",
+        borderRadius: "14px",
+        background: "var(--surface-raised)",
+      }}
+    >
+      {editingSlide && <input name="id" type="hidden" value={editingSlide.id} />}
+
+      {/* Mode Switcher Tabs */}
+      <div style={{ gridColumn: "1 / -1", marginBottom: "8px" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "12px", borderBottom: "1px solid var(--line)", paddingBottom: "14px" }}>
+          <div>
+            <span style={{ fontSize: "11px", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "#dfb15b" }}>
+              Slide Media Source
+            </span>
+            <p style={{ margin: "2px 0 0 0", fontSize: "13px", color: "var(--text-muted)" }}>
+              Directly upload high-resolution images or videos from your device, or enter a media URL:
+            </p>
+          </div>
+          <div style={{ display: "inline-flex", background: "rgba(0, 0, 0, 0.4)", padding: "3px", borderRadius: "8px", border: "1px solid var(--line)" }}>
+            <button
+              type="button"
+              onClick={() => setUploadMode("direct")}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+                padding: "6px 14px",
+                borderRadius: "6px",
+                fontSize: "12px",
+                fontWeight: 600,
+                background: uploadMode === "direct" ? "rgba(223, 177, 91, 0.2)" : "transparent",
+                color: uploadMode === "direct" ? "#dfb15b" : "var(--text-muted)",
+                border: uploadMode === "direct" ? "1px solid rgba(223, 177, 91, 0.4)" : "1px solid transparent",
+                cursor: "pointer",
+                transition: "all 0.15s ease",
+              }}
+            >
+              <Upload size={14} /> Direct File Upload (Image / Video)
+            </button>
+            <button
+              type="button"
+              onClick={() => setUploadMode("url")}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+                padding: "6px 14px",
+                borderRadius: "6px",
+                fontSize: "12px",
+                fontWeight: 600,
+                background: uploadMode === "url" ? "rgba(223, 177, 91, 0.2)" : "transparent",
+                color: uploadMode === "url" ? "#dfb15b" : "var(--text-muted)",
+                border: uploadMode === "url" ? "1px solid rgba(223, 177, 91, 0.4)" : "1px solid transparent",
+                cursor: "pointer",
+                transition: "all 0.15s ease",
+              }}
+            >
+              <LinkIcon size={14} /> External URL / Brand Path
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Direct Upload Mode UI */}
+      {uploadMode === "direct" && (
+        <div style={{ gridColumn: "1 / -1", display: "flex", flexDirection: "column", gap: "12px" }}>
+          <input
+            ref={fileInputRef}
+            accept="image/*,video/mp4,video/webm"
+            name="file"
+            onChange={(e) => {
+              if (e.target.files && e.target.files[0]) {
+                handleFile(e.target.files[0]);
+              }
+            }}
+            style={{ display: "none" }}
+            type="file"
+          />
+
+          {!selectedFile ? (
+            <div>
+              <div
+                onClick={() => fileInputRef.current?.click()}
+                onDragLeave={(e) => {
+                  e.preventDefault();
+                  setIsDragging(false);
+                }}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setIsDragging(true);
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setIsDragging(false);
+                  if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                    handleFile(e.dataTransfer.files[0]);
+                  }
+                }}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    fileInputRef.current?.click();
+                  }
+                }}
+                style={{
+                  border: isDragging ? "2px dashed #dfb15b" : "2px dashed rgba(223, 177, 91, 0.4)",
+                  borderRadius: "12px",
+                  padding: "36px 20px",
+                  textAlign: "center",
+                  background: isDragging ? "rgba(223, 177, 91, 0.08)" : "rgba(255, 255, 255, 0.015)",
+                  cursor: "pointer",
+                  transition: "all 0.2s ease",
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: "10px",
+                }}
+              >
+                <div
+                  style={{
+                    width: "52px",
+                    height: "52px",
+                    borderRadius: "50%",
+                    background: "rgba(223, 177, 91, 0.12)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: "#dfb15b",
+                  }}
+                >
+                  <Upload size={26} />
+                </div>
+                <div>
+                  <h4 style={{ margin: "0 0 4px 0", color: "#dfb15b", fontSize: "15px", fontWeight: 600 }}>
+                    Direct Image &amp; Video File Upload
+                  </h4>
+                  <p style={{ margin: 0, fontSize: "13px", color: "var(--text-muted)" }}>
+                    Drag &amp; drop your media file here, or <span style={{ color: "#dfb15b", textDecoration: "underline" }}>browse files from device</span>
+                  </p>
+                </div>
+                <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", justifyContent: "center", marginTop: "4px" }}>
+                  <span style={{ fontSize: "11px", padding: "2px 8px", borderRadius: "4px", background: "rgba(255, 255, 255, 0.05)", border: "1px solid var(--line)", color: "var(--text-muted)" }}>
+                    Images: JPG, PNG, WEBP, SVG
+                  </span>
+                  <span style={{ fontSize: "11px", padding: "2px 8px", borderRadius: "4px", background: "rgba(223, 177, 91, 0.12)", border: "1px solid rgba(223, 177, 91, 0.3)", color: "#dfb15b" }}>
+                    Videos: MP4, WEBM
+                  </span>
+                  <span style={{ fontSize: "11px", padding: "2px 8px", borderRadius: "4px", background: "rgba(255, 255, 255, 0.05)", border: "1px solid var(--line)", color: "var(--text-muted)" }}>
+                    Max 50MB
+                  </span>
+                </div>
+              </div>
+
+              {/* Show existing asset if editing and no file selected yet */}
+              {editingSlide?.image_url && (
+                <div style={{ marginTop: "12px", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderRadius: "8px", background: "rgba(255, 255, 255, 0.03)", border: "1px solid var(--line)" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "12px", overflow: "hidden" }}>
+                    <div style={{ width: "72px", height: "44px", borderRadius: "6px", overflow: "hidden", background: "#000", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                      {existingIsVideo ? (
+                        <video src={editingSlide.image_url} style={{ width: "100%", height: "100%", objectFit: "cover" }} muted />
+                      ) : (
+                        /* eslint-disable-next-line @next/next/no-img-element */
+                        <img
+                          alt={editingSlide.alt_text || editingSlide.title}
+                          src={editingSlide.image_url}
+                          style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                        />
+                      )}
+                    </div>
+                    <div style={{ overflow: "hidden" }}>
+                      <span style={{ fontSize: "10px", fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "#dfb15b" }}>
+                        Current Slide Media
+                      </span>
+                      <p style={{ margin: "2px 0 0 0", fontSize: "12px", fontFamily: "monospace", color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {editingSlide.image_url}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="button button-secondary"
+                    style={{ fontSize: "12px", padding: "4px 12px", flexShrink: 0 }}
+                  >
+                    Replace File
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div
+              style={{
+                border: "1px solid rgba(223, 177, 91, 0.4)",
+                borderRadius: "12px",
+                padding: "16px",
+                background: "rgba(0, 0, 0, 0.4)",
+                display: "flex",
+                flexDirection: "column",
+                gap: "12px",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  {isVideoFile ? (
+                    <span style={{ fontSize: "11px", fontWeight: 700, padding: "3px 8px", borderRadius: "4px", background: "#dfb15b", color: "#000", display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                      <Video size={13} /> VIDEO ASSET SELECTED
+                    </span>
+                  ) : (
+                    <span style={{ fontSize: "11px", fontWeight: 700, padding: "3px 8px", borderRadius: "4px", background: "#dfb15b", color: "#000", display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                      <ImageIcon size={13} /> IMAGE ASSET SELECTED
+                    </span>
+                  )}
+                  <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>
+                    Ready to upload to cloud storage on save
+                  </span>
+                </div>
+                <div style={{ display: "flex", gap: "8px" }}>
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="button button-secondary"
+                    style={{ padding: "4px 10px", fontSize: "12px" }}
+                  >
+                    Change File
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleRemoveFile}
+                    className="button button-secondary"
+                    style={{ padding: "4px 10px", fontSize: "12px", color: "var(--danger)" }}
+                  >
+                    <X size={12} style={{ marginRight: "4px" }} /> Remove
+                  </button>
+                </div>
+              </div>
+
+              {/* Interactive Preview Container */}
+              <div
+                style={{
+                  width: "100%",
+                  maxHeight: "300px",
+                  borderRadius: "8px",
+                  overflow: "hidden",
+                  background: "#050505",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  border: "1px solid var(--line)",
+                }}
+              >
+                {isVideoFile ? (
+                  <video
+                    src={previewUrl ?? undefined}
+                    controls
+                    autoPlay
+                    muted
+                    playsInline
+                    style={{ width: "100%", maxHeight: "300px", objectFit: "contain" }}
+                  />
+                ) : (
+                  /* eslint-disable-next-line @next/next/no-img-element */
+                  <img
+                    alt="Selected Preview"
+                    src={previewUrl ?? undefined}
+                    style={{ width: "100%", maxHeight: "300px", objectFit: "contain" }}
+                  />
+                )}
+              </div>
+
+              {/* File Info Bar */}
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px", fontSize: "12px", color: "var(--text-muted)", borderTop: "1px solid var(--line)", paddingTop: "10px" }}>
+                <span><strong>File:</strong> {selectedFile.name}</span>
+                <span><strong>Size:</strong> {formatFileSize(selectedFile.size)}</span>
+                <span><strong>Type:</strong> {selectedFile.type || "Auto-detect"}</span>
+              </div>
+            </div>
+          )}
+
+          {/* Hidden image_url input for direct mode */}
+          <input
+            name="image_url"
+            type="hidden"
+            value={selectedFile ? "" : (editingSlide?.image_url ?? "")}
+          />
+        </div>
+      )}
+
+      {/* External URL Mode UI */}
+      {uploadMode === "url" && (
+        <div style={{ gridColumn: "1 / -1", display: "flex", flexDirection: "column", gap: "10px" }}>
+          <label>
+            Media URL or Relative Brand Path *
+            <input
+              name="image_url"
+              onChange={(e) => setManualUrl(e.target.value)}
+              placeholder="https://.../video.mp4 or /brand/thecodexthrill-banner.jpg"
+              required={uploadMode === "url"}
+              type="text"
+              value={manualUrl}
+            />
+          </label>
+          <small style={{ color: "var(--text-muted)", marginTop: "-6px" }}>
+            Supports direct links to images (JPG, PNG, WEBP, SVG) or background videos (MP4, WEBM).
+          </small>
+
+          {manualUrl && (
+            <div style={{ marginTop: "4px" }}>
+              <span style={{ fontSize: "11px", fontWeight: 600, color: "#dfb15b" }}>URL Live Preview:</span>
+              <div style={{ width: "100%", maxHeight: "200px", borderRadius: "8px", overflow: "hidden", background: "#050505", marginTop: "4px", border: "1px solid var(--line)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                {manualUrl.endsWith(".mp4") || manualUrl.endsWith(".webm") ? (
+                  <video controls muted src={manualUrl} style={{ width: "100%", maxHeight: "200px", objectFit: "contain" }} />
+                ) : (
+                  /* eslint-disable-next-line @next/next/no-img-element */
+                  <img
+                    alt="URL Preview"
+                    onError={(e) => {
+                      (e.currentTarget as HTMLElement).style.display = "none";
+                    }}
+                    src={manualUrl}
+                    style={{ width: "100%", maxHeight: "200px", objectFit: "contain" }}
+                  />
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Standard Form Metadata Fields */}
+      <label>
+        Slide Title / Internal Name *
+        <input defaultValue={editingSlide?.title ?? ""} name="title" placeholder="TheCodexThrill Engineering Studio" required type="text" />
+      </label>
+      <label>
+        Visual Label Overlay *
+        <input defaultValue={editingSlide?.label ?? "TheCodexThrill Engineering Studio"} name="label" placeholder="TheCodexThrill Engineering Studio" required type="text" />
+      </label>
+      <label>
+        Tagline Overlay *
+        <input defaultValue={editingSlide?.tagline ?? "BUILD | INNOVATE | DEPLOY | SCALE"} name="tagline" placeholder="BUILD | INNOVATE | DEPLOY | SCALE" required type="text" />
+      </label>
+      <label>
+        Media Alt / Accessibility Description *
+        <input defaultValue={editingSlide?.alt_text ?? "TheCodexThrill — Build, Innovate, Deploy, Scale"} name="alt_text" placeholder="Descriptive text for accessibility & SEO" required type="text" />
+      </label>
+      <label>
+        Optional Slide Link
+        <input defaultValue={editingSlide?.link_url ?? "/contact"} name="link_url" placeholder="/contact or /portfolio" type="text" />
+      </label>
+      <label>
+        Publication Status
+        <select defaultValue={editingSlide?.status ?? "published"} name="status">
+          <option value="published">Published</option>
+          <option value="draft">Draft</option>
+          <option value="review">Review</option>
+          <option value="archived">Archived</option>
+        </select>
+      </label>
+      <label>
+        Sort Order (Ascending)
+        <input defaultValue={editingSlide?.sort_order ?? 0} name="sort_order" type="number" />
+      </label>
+      <div style={{ display: "flex", gap: "10px", gridColumn: "1 / -1", marginTop: "8px" }}>
+        <button className="button button-gold" disabled={saveSlidePending} type="submit">
+          {saveSlidePending
+            ? "Saving & Uploading Slide…"
+            : selectedFile
+              ? (editingSlide ? "Upload & Update Slide" : "Upload & Create Slide")
+              : (editingSlide ? "Update Slide" : "Create Slide")}
+        </button>
+        <button
+          className="button button-secondary"
+          onClick={onCancel}
+          type="button"
+        >
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
+
 export function CmsHeroManager({
   slides,
   heroSettings,
@@ -946,97 +1406,16 @@ export function CmsHeroManager({
         {deleteSlideState.message && <p className="module-success" role="status">{deleteSlideState.message}</p>}
 
         {(isCreatingSlide || editingSlide) && (
-          <form
-            action={saveSlideAction}
-            className="auth-form lead-create-form"
-            encType="multipart/form-data"
-            style={{ marginTop: "24px", marginBottom: "32px", padding: "20px", border: "1px solid var(--line)", borderRadius: "14px", background: "var(--surface-raised)" }}
-          >
-            {editingSlide && <input name="id" type="hidden" value={editingSlide.id} />}
-            
-            <label style={{ gridColumn: "1 / -1" }}>
-              Upload Slide Image/Video (Optional — Auto-uploads to storage and populates URL)
-              <input
-                accept="image/*,video/mp4,video/webm"
-                name="file"
-                type="file"
-              />
-            </label>
-
-            {editingSlide?.image_url && (
-              <div style={{ gridColumn: "1 / -1", display: "flex", alignItems: "center", gap: "12px", padding: "10px 14px", borderRadius: "8px", background: "var(--surface)", border: "1px solid var(--line)" }}>
-                <div style={{ width: "64px", height: "40px", borderRadius: "6px", overflow: "hidden", background: "#000", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  {editingSlide.image_url.endsWith(".mp4") || editingSlide.image_url.endsWith(".webm") ? (
-                    <Video color="#dfb15b" size={20} />
-                  ) : (
-                    /* eslint-disable-next-line @next/next/no-img-element */
-                    <img
-                      alt={editingSlide.alt_text || editingSlide.title}
-                      src={editingSlide.image_url}
-                      style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                    />
-                  )}
-                </div>
-                <div>
-                  <small style={{ color: "var(--text-muted)" }}>Current Slide Asset:</small>
-                  <p style={{ margin: 0, fontSize: "12px", fontFamily: "monospace" }}>{editingSlide.image_url}</p>
-                </div>
-              </div>
-            )}
-
-            <label>
-              Slide Title / Internal Name *
-              <input defaultValue={editingSlide?.title ?? ""} name="title" placeholder="TheCodexThrill Engineering Studio" required type="text" />
-            </label>
-            <label>
-              Visual Label Overlay
-              <input defaultValue={editingSlide?.label ?? "TheCodexThrill Engineering Studio"} name="label" placeholder="TheCodexThrill Engineering Studio" required type="text" />
-            </label>
-            <label>
-              Tagline Overlay
-              <input defaultValue={editingSlide?.tagline ?? "BUILD | INNOVATE | DEPLOY | SCALE"} name="tagline" placeholder="BUILD | INNOVATE | DEPLOY | SCALE" required type="text" />
-            </label>
-            <label>
-              Image URL / Path *
-              <input defaultValue={editingSlide?.image_url ?? "/brand/thecodexthrill-banner.jpg"} name="image_url" placeholder="/brand/thecodexthrill-banner.jpg" required type="text" />
-            </label>
-            <label>
-              Image Alt Text *
-              <input defaultValue={editingSlide?.alt_text ?? "TheCodexThrill — Build, Innovate, Deploy, Scale"} name="alt_text" required type="text" />
-            </label>
-            <label>
-              Optional Slide Link
-              <input defaultValue={editingSlide?.link_url ?? "/contact"} name="link_url" placeholder="/contact" type="text" />
-            </label>
-            <label>
-              Publication Status
-              <select defaultValue={editingSlide?.status ?? "published"} name="status">
-                <option value="published">Published</option>
-                <option value="draft">Draft</option>
-                <option value="review">Review</option>
-                <option value="archived">Archived</option>
-              </select>
-            </label>
-            <label>
-              Sort Order (Ascending)
-              <input defaultValue={editingSlide?.sort_order ?? 0} name="sort_order" type="number" />
-            </label>
-            <div style={{ display: "flex", gap: "10px", gridColumn: "1 / -1" }}>
-              <button className="button button-gold" disabled={saveSlidePending} type="submit">
-                {saveSlidePending ? "Saving Slide…" : editingSlide ? "Update Slide" : "Create Slide"}
-              </button>
-              <button
-                className="button button-secondary"
-                onClick={() => {
-                  setEditingSlide(null);
-                  setIsCreatingSlide(false);
-                }}
-                type="button"
-              >
-                Cancel
-              </button>
-            </div>
-          </form>
+          <CmsHeroSlideEditorForm
+            key={editingSlide?.id ?? "new-slide"}
+            editingSlide={editingSlide}
+            saveSlideAction={saveSlideAction}
+            saveSlidePending={saveSlidePending}
+            onCancel={() => {
+              setEditingSlide(null);
+              setIsCreatingSlide(false);
+            }}
+          />
         )}
 
         <div className="module-table-wrap" style={{ marginTop: "20px" }}>
@@ -1989,6 +2368,459 @@ export function formatMediaBytes(bytes: number, decimals = 1): string {
 
 const MEDIA_CATEGORIES = ["ALL", "HERO", "PORTFOLIO", "BLOG", "BRAND", "GENERAL"] as const;
 
+function CmsMediaAssetEditorForm({
+  editingItem,
+  saveAction,
+  savePending,
+  onCancel,
+}: {
+  editingItem: CmsMediaRecord | null;
+  saveAction: (payload: FormData) => void;
+  savePending: boolean;
+  onCancel: () => void;
+}) {
+  const [uploadMode, setUploadMode] = useState<"direct" | "url">("direct");
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [fileName, setFileName] = useState<string>(editingItem?.file_name ?? "");
+  const [mimeType, setMimeType] = useState<string>(editingItem?.mime_type ?? "image/jpeg");
+  const [fileSizeBytes, setFileSizeBytes] = useState<number>(editingItem?.file_size_bytes ?? 1024);
+  const [publicUrl, setPublicUrl] = useState<string>(editingItem?.public_url ?? "");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
+
+  const handleFile = (file: File) => {
+    if (file.size > 52428800) {
+      alert("File size exceeds 50MB limit. Please choose a smaller file.");
+      return;
+    }
+    setSelectedFile(file);
+    setFileName(file.name);
+    setMimeType(file.type || (file.name.endsWith(".mp4") ? "video/mp4" : "image/jpeg"));
+    setFileSizeBytes(file.size);
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setPreviewUrl(URL.createObjectURL(file));
+    if (fileInputRef.current) {
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      fileInputRef.current.files = dt.files;
+    }
+  };
+
+  const handleRemoveFile = () => {
+    setSelectedFile(null);
+    if (previewUrl) {
+      URL.revokeObjectURL(previewUrl);
+      setPreviewUrl(null);
+    }
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+    if (!editingItem) {
+      setFileName("");
+      setMimeType("image/jpeg");
+      setFileSizeBytes(1024);
+    }
+  };
+
+  const isVideo =
+    selectedFile?.type.startsWith("video/") ||
+    selectedFile?.name.toLowerCase().endsWith(".mp4") ||
+    selectedFile?.name.toLowerCase().endsWith(".webm") ||
+    mimeType.startsWith("video/") ||
+    publicUrl.toLowerCase().endsWith(".mp4") ||
+    publicUrl.toLowerCase().endsWith(".webm");
+
+  return (
+    <form
+      action={saveAction}
+      className="auth-form lead-create-form"
+      encType="multipart/form-data"
+      style={{
+        marginTop: "24px",
+        marginBottom: "32px",
+        padding: "24px",
+        border: "1px solid var(--line)",
+        borderRadius: "14px",
+        background: "var(--surface-raised)",
+      }}
+    >
+      {editingItem && <input name="id" type="hidden" value={editingItem.id} />}
+
+      {/* Mode Switcher */}
+      <div style={{ gridColumn: "1 / -1", marginBottom: "8px" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "12px", borderBottom: "1px solid var(--line)", paddingBottom: "14px" }}>
+          <div>
+            <span style={{ fontSize: "11px", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "#dfb15b" }}>
+              Asset Media Source
+            </span>
+            <p style={{ margin: "2px 0 0 0", fontSize: "13px", color: "var(--text-muted)" }}>
+              Upload directly from device or register an external asset URL:
+            </p>
+          </div>
+          <div style={{ display: "inline-flex", background: "rgba(0, 0, 0, 0.4)", padding: "3px", borderRadius: "8px", border: "1px solid var(--line)" }}>
+            <button
+              type="button"
+              onClick={() => setUploadMode("direct")}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+                padding: "6px 14px",
+                borderRadius: "6px",
+                fontSize: "12px",
+                fontWeight: 600,
+                background: uploadMode === "direct" ? "rgba(223, 177, 91, 0.2)" : "transparent",
+                color: uploadMode === "direct" ? "#dfb15b" : "var(--text-muted)",
+                border: uploadMode === "direct" ? "1px solid rgba(223, 177, 91, 0.4)" : "1px solid transparent",
+                cursor: "pointer",
+                transition: "all 0.15s ease",
+              }}
+            >
+              <Upload size={14} /> Direct File Upload
+            </button>
+            <button
+              type="button"
+              onClick={() => setUploadMode("url")}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+                padding: "6px 14px",
+                borderRadius: "6px",
+                fontSize: "12px",
+                fontWeight: 600,
+                background: uploadMode === "url" ? "rgba(223, 177, 91, 0.2)" : "transparent",
+                color: uploadMode === "url" ? "#dfb15b" : "var(--text-muted)",
+                border: uploadMode === "url" ? "1px solid rgba(223, 177, 91, 0.4)" : "1px solid transparent",
+                cursor: "pointer",
+                transition: "all 0.15s ease",
+              }}
+            >
+              <LinkIcon size={14} /> External URL / Brand Path
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {uploadMode === "direct" && (
+        <div style={{ gridColumn: "1 / -1", display: "flex", flexDirection: "column", gap: "12px" }}>
+          <input
+            ref={fileInputRef}
+            accept="image/*,video/mp4,video/webm"
+            name="file"
+            onChange={(e) => {
+              if (e.target.files && e.target.files[0]) {
+                handleFile(e.target.files[0]);
+              }
+            }}
+            style={{ display: "none" }}
+            type="file"
+          />
+
+          {!selectedFile ? (
+            <div>
+              <div
+                onClick={() => fileInputRef.current?.click()}
+                onDragLeave={(e) => {
+                  e.preventDefault();
+                  setIsDragging(false);
+                }}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setIsDragging(true);
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setIsDragging(false);
+                  if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                    handleFile(e.dataTransfer.files[0]);
+                  }
+                }}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    fileInputRef.current?.click();
+                  }
+                }}
+                style={{
+                  border: isDragging ? "2px dashed #dfb15b" : "2px dashed rgba(223, 177, 91, 0.4)",
+                  borderRadius: "12px",
+                  padding: "36px 20px",
+                  textAlign: "center",
+                  background: isDragging ? "rgba(223, 177, 91, 0.08)" : "rgba(255, 255, 255, 0.015)",
+                  cursor: "pointer",
+                  transition: "all 0.2s ease",
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: "10px",
+                }}
+              >
+                <div
+                  style={{
+                    width: "52px",
+                    height: "52px",
+                    borderRadius: "50%",
+                    background: "rgba(223, 177, 91, 0.12)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: "#dfb15b",
+                  }}
+                >
+                  <Upload size={26} />
+                </div>
+                <div>
+                  <h4 style={{ margin: "0 0 4px 0", color: "#dfb15b", fontSize: "15px", fontWeight: 600 }}>
+                    Upload Media File Directly
+                  </h4>
+                  <p style={{ margin: 0, fontSize: "13px", color: "var(--text-muted)" }}>
+                    Drag &amp; drop file here, or <span style={{ color: "#dfb15b", textDecoration: "underline" }}>browse files from device</span>
+                  </p>
+                </div>
+                <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", justifyContent: "center", marginTop: "4px" }}>
+                  <span style={{ fontSize: "11px", padding: "2px 8px", borderRadius: "4px", background: "rgba(255, 255, 255, 0.05)", border: "1px solid var(--line)", color: "var(--text-muted)" }}>
+                    Images: JPG, PNG, WEBP, SVG
+                  </span>
+                  <span style={{ fontSize: "11px", padding: "2px 8px", borderRadius: "4px", background: "rgba(223, 177, 91, 0.12)", border: "1px solid rgba(223, 177, 91, 0.3)", color: "#dfb15b" }}>
+                    Videos: MP4, WEBM
+                  </span>
+                  <span style={{ fontSize: "11px", padding: "2px 8px", borderRadius: "4px", background: "rgba(255, 255, 255, 0.05)", border: "1px solid var(--line)", color: "var(--text-muted)" }}>
+                    Max 50MB
+                  </span>
+                </div>
+              </div>
+
+              {editingItem?.public_url && (
+                <div style={{ marginTop: "12px", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderRadius: "8px", background: "rgba(255, 255, 255, 0.03)", border: "1px solid var(--line)" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "12px", overflow: "hidden" }}>
+                    <div style={{ width: "72px", height: "44px", borderRadius: "6px", overflow: "hidden", background: "#000", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                      {isVideo ? (
+                        <video src={editingItem.public_url} style={{ width: "100%", height: "100%", objectFit: "cover" }} muted />
+                      ) : (
+                        /* eslint-disable-next-line @next/next/no-img-element */
+                        <img
+                          alt={editingItem.alt_text || editingItem.file_name}
+                          src={editingItem.public_url}
+                          style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                        />
+                      )}
+                    </div>
+                    <div style={{ overflow: "hidden" }}>
+                      <span style={{ fontSize: "10px", fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "#dfb15b" }}>
+                        Current Registered Asset
+                      </span>
+                      <p style={{ margin: "2px 0 0 0", fontSize: "12px", fontFamily: "monospace", color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {editingItem.public_url}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="button button-secondary"
+                    style={{ fontSize: "12px", padding: "4px 12px", flexShrink: 0 }}
+                  >
+                    Replace File
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div
+              style={{
+                border: "1px solid rgba(223, 177, 91, 0.4)",
+                borderRadius: "12px",
+                padding: "16px",
+                background: "rgba(0, 0, 0, 0.4)",
+                display: "flex",
+                flexDirection: "column",
+                gap: "12px",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  {isVideo ? (
+                    <span style={{ fontSize: "11px", fontWeight: 700, padding: "3px 8px", borderRadius: "4px", background: "#dfb15b", color: "#000", display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                      <Video size={13} /> VIDEO FILE SELECTED
+                    </span>
+                  ) : (
+                    <span style={{ fontSize: "11px", fontWeight: 700, padding: "3px 8px", borderRadius: "4px", background: "#dfb15b", color: "#000", display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                      <ImageIcon size={13} /> IMAGE FILE SELECTED
+                    </span>
+                  )}
+                  <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>
+                    Ready to upload on save
+                  </span>
+                </div>
+                <div style={{ display: "flex", gap: "8px" }}>
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="button button-secondary"
+                    style={{ padding: "4px 10px", fontSize: "12px" }}
+                  >
+                    Change File
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleRemoveFile}
+                    className="button button-secondary"
+                    style={{ padding: "4px 10px", fontSize: "12px", color: "var(--danger)" }}
+                  >
+                    <X size={12} style={{ marginRight: "4px" }} /> Remove
+                  </button>
+                </div>
+              </div>
+
+              <div
+                style={{
+                  width: "100%",
+                  maxHeight: "260px",
+                  borderRadius: "8px",
+                  overflow: "hidden",
+                  background: "#050505",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  border: "1px solid var(--line)",
+                }}
+              >
+                {isVideo ? (
+                  <video
+                    src={previewUrl ?? undefined}
+                    controls
+                    autoPlay
+                    muted
+                    playsInline
+                    style={{ width: "100%", maxHeight: "260px", objectFit: "contain" }}
+                  />
+                ) : (
+                  /* eslint-disable-next-line @next/next/no-img-element */
+                  <img
+                    alt="Selected Preview"
+                    src={previewUrl ?? undefined}
+                    style={{ width: "100%", maxHeight: "260px", objectFit: "contain" }}
+                  />
+                )}
+              </div>
+
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px", fontSize: "12px", color: "var(--text-muted)", borderTop: "1px solid var(--line)", paddingTop: "10px" }}>
+                <span><strong>File:</strong> {selectedFile.name}</span>
+                <span><strong>Size:</strong> {formatMediaBytes(selectedFile.size)}</span>
+                <span><strong>Type:</strong> {selectedFile.type || "Auto-detect"}</span>
+              </div>
+            </div>
+          )}
+
+          <input
+            name="public_url"
+            type="hidden"
+            value={selectedFile ? "" : (editingItem?.public_url ?? "")}
+          />
+        </div>
+      )}
+
+      {uploadMode === "url" && (
+        <label style={{ gridColumn: "1 / -1" }}>
+          Public Asset URL / Path *
+          <input
+            name="public_url"
+            onChange={(e) => setPublicUrl(e.target.value)}
+            placeholder="/brand/thecodexthrill-banner.jpg or https://..."
+            required={uploadMode === "url"}
+            type="text"
+            value={publicUrl}
+          />
+        </label>
+      )}
+
+      <label>
+        Asset File Name *
+        <input
+          name="file_name"
+          onChange={(e) => setFileName(e.target.value)}
+          placeholder="thecodexthrill-banner.jpg"
+          required
+          type="text"
+          value={fileName}
+        />
+      </label>
+
+      <label>
+        Category
+        <select defaultValue={editingItem?.category ?? "general"} name="category">
+          <option value="general">General</option>
+          <option value="hero">Hero Banner</option>
+          <option value="portfolio">Case Study / Portfolio</option>
+          <option value="blog">Blog / Insights</option>
+          <option value="brand">Brand Identity</option>
+        </select>
+      </label>
+
+      <label>
+        MIME Type
+        <input
+          name="mime_type"
+          onChange={(e) => setMimeType(e.target.value)}
+          placeholder="image/jpeg or video/mp4"
+          type="text"
+          value={mimeType}
+        />
+      </label>
+
+      <label>
+        Estimated File Size (Bytes)
+        <input
+          min="1"
+          name="file_size_bytes"
+          onChange={(e) => setFileSizeBytes(Number(e.target.value) || 1024)}
+          type="number"
+          value={fileSizeBytes}
+        />
+      </label>
+
+      <label style={{ gridColumn: "1 / -1" }}>
+        Accessible Alt Text / Screen Reader Description *
+        <input
+          defaultValue={editingItem?.alt_text ?? ""}
+          name="alt_text"
+          placeholder="Descriptive alt text for screen readers, posters, and SEO"
+          required
+          type="text"
+        />
+      </label>
+
+      <div style={{ display: "flex", gap: "10px", gridColumn: "1 / -1", marginTop: "8px" }}>
+        <button className="button button-gold" disabled={savePending} type="submit">
+          {savePending
+            ? "Saving Asset…"
+            : selectedFile
+              ? (editingItem ? "Upload & Update Asset" : "Upload & Register Asset")
+              : (editingItem ? "Update Asset" : "Register Asset")}
+        </button>
+        <button
+          className="button button-secondary"
+          onClick={onCancel}
+          type="button"
+        >
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
+
 export function CmsMediaManager({ media }: { media: CmsMediaRecord[] }) {
   const [saveState, saveAction, savePending] = useActionState(saveCmsMediaAction, initialState);
   const [deleteState, deleteAction, deletePending] = useActionState(deleteCmsMediaAction, initialState);
@@ -2041,69 +2873,16 @@ export function CmsMediaManager({ media }: { media: CmsMediaRecord[] }) {
         {deleteState.message && <p className="module-success" role="status">{deleteState.message}</p>}
 
         {(isCreating || editingItem) && (
-          <form
-            action={saveAction}
-            className="auth-form lead-create-form"
-            encType="multipart/form-data"
-            style={{ marginTop: "24px", marginBottom: "32px", padding: "20px", border: "1px solid var(--line)", borderRadius: "14px", background: "var(--surface-raised)" }}
-          >
-            {editingItem && <input name="id" type="hidden" value={editingItem.id} />}
-            
-            <label style={{ gridColumn: "1 / -1" }}>
-              Upload Asset File (Optional — Auto-detects filename, MIME type, and size)
-              <input
-                accept="image/*,video/mp4,video/webm"
-                name="file"
-                type="file"
-              />
-            </label>
-
-            <label>
-              Asset File Name *
-              <input defaultValue={editingItem?.file_name ?? ""} name="file_name" placeholder="thecodexthrill-banner.jpg" required type="text" />
-            </label>
-            <label>
-              Public Asset URL / Path *
-              <input defaultValue={editingItem?.public_url ?? ""} name="public_url" placeholder="/brand/thecodexthrill-banner.jpg or https://..." required type="text" />
-            </label>
-            <label>
-              Category
-              <select defaultValue={editingItem?.category ?? "general"} name="category">
-                <option value="general">General</option>
-                <option value="hero">Hero Banner</option>
-                <option value="portfolio">Case Study / Portfolio</option>
-                <option value="blog">Blog / Insights</option>
-                <option value="brand">Brand Identity</option>
-              </select>
-            </label>
-            <label>
-              MIME Type
-              <input defaultValue={editingItem?.mime_type ?? "image/jpeg"} name="mime_type" placeholder="image/jpeg or video/mp4" type="text" />
-            </label>
-            <label>
-              Estimated File Size (Bytes)
-              <input defaultValue={editingItem?.file_size_bytes ?? 1024} min="1" name="file_size_bytes" type="number" />
-            </label>
-            <label style={{ gridColumn: "1 / -1" }}>
-              Accessible Alt Text / Screen Reader Description *
-              <input defaultValue={editingItem?.alt_text ?? ""} name="alt_text" placeholder="Descriptive alt text for screen readers, posters, and SEO" required type="text" />
-            </label>
-            <div style={{ display: "flex", gap: "10px", gridColumn: "1 / -1" }}>
-              <button className="button button-gold" disabled={savePending} type="submit">
-                {savePending ? "Saving Asset…" : editingItem ? "Update Asset" : "Register Asset"}
-              </button>
-              <button
-                className="button button-secondary"
-                onClick={() => {
-                  setEditingItem(null);
-                  setIsCreating(false);
-                }}
-                type="button"
-              >
-                Cancel
-              </button>
-            </div>
-          </form>
+          <CmsMediaAssetEditorForm
+            key={editingItem?.id ?? "new-media"}
+            editingItem={editingItem}
+            saveAction={saveAction}
+            savePending={savePending}
+            onCancel={() => {
+              setEditingItem(null);
+              setIsCreating(false);
+            }}
+          />
         )}
 
         {/* Category Filter Pills */}

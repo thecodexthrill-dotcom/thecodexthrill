@@ -171,3 +171,29 @@ test("CMS media, navigation menu, and revision restore actions align with Postgr
   assert.match(cmsActionsSource, /technologies:\s*Array\.isArray\(snap\.technologies\)/);
 });
 
+test("CMS Hero Slide & Media Library direct upload provides bucket auto-creation, video handling, and dropzone preview", () => {
+  const cmsActionsSource = readFileSync("src/lib/supabase/cms-actions.ts", "utf8");
+  const cmsManagerSource = readFileSync("src/components/platform/cms-manager.tsx", "utf8");
+
+  // Verify bucket auto-creation resilience
+  assert.match(cmsActionsSource, /async function ensureCmsMediaBucket/);
+  assert.match(cmsActionsSource, /adminSupabase\.storage\.listBuckets/);
+  assert.match(cmsActionsSource, /adminSupabase\.storage\.createBucket\("cms-media"/);
+
+  // Verify video and image MIME detection in saveCmsHeroSlideAction
+  assert.match(cmsActionsSource, /video\/mp4/);
+  assert.match(cmsActionsSource, /video\/webm/);
+
+  // Verify CmsHeroSlideEditorForm dropzone and interactive preview
+  assert.match(cmsManagerSource, /function CmsHeroSlideEditorForm/);
+  assert.match(cmsManagerSource, /Direct Image &amp; Video File Upload/);
+  assert.match(cmsManagerSource, /VIDEO ASSET SELECTED/);
+  assert.match(cmsManagerSource, /IMAGE ASSET SELECTED/);
+  assert.match(cmsManagerSource, /<video/);
+
+  // Verify CmsMediaAssetEditorForm dropzone
+  assert.match(cmsManagerSource, /function CmsMediaAssetEditorForm/);
+  assert.match(cmsManagerSource, /Upload Media File Directly/);
+});
+
+
