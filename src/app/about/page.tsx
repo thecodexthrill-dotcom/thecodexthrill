@@ -74,7 +74,7 @@ const securityStandards = [
   },
   {
     title: "Zero-Downtime Migration Architecture",
-    desc: "Database schema evolutions are scripted as declarative, backward-compatible migrations deployed via Supabase CLI and validated in automated test environments.",
+    desc: "Database schema evolutions are scripted as declarative, backward-compatible migrations deployed via automated CI/CD pipelines and validated in automated test environments.",
     icon: Cpu,
   },
 ];

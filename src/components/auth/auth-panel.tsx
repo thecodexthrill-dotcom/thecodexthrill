@@ -89,7 +89,7 @@ export function AuthPanel({
         <p className="eyebrow"><span />{content.eyebrow}</p>
         <h1 id="auth-title">{content.title}</h1>
         <p className="auth-description">{content.description}</p>
-        <div className="auth-notice"><ShieldCheck aria-hidden="true" size={18} /><p>No public signup or role switching. Access depends on your verified Supabase session and database permissions.</p></div>
+        <div className="auth-notice"><ShieldCheck aria-hidden="true" size={18} /><p>No public signup or role switching. Access depends on your verified session and database permissions.</p></div>
         {canShowForm ? (
           <form action={formAction} className="auth-form">
             {(mode === "login" || mode === "forgot") && <label>Email address<input autoComplete="email" name="email" required type="email" /></label>}

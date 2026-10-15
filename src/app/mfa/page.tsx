@@ -3,18 +3,9 @@ import { redirect } from "next/navigation";
 import { ThemeToggle } from "@/components/site/theme-toggle";
 import { MfaChallenge } from "@/components/auth/mfa-challenge";
 import { createClient } from "@/lib/supabase/server";
+import { isSafeNextPath } from "@/lib/supabase/auth-flow";
 
 export const metadata = { title: "Secure your account", robots: { index: false, follow: false } };
-
-const allowedNext = new Set(["/portal", "/admin", "/bootstrap/initial", "/bootstrap/owner-transfer", "/reset-password", "/account/security"]);
-
-function isSafeNextPath(candidate: string | undefined): boolean {
-  if (!candidate) return false;
-  if (!candidate.startsWith("/") || candidate.startsWith("//") || candidate.includes("\\")) return false;
-  if (allowedNext.has(candidate)) return true;
-  if (candidate.startsWith("/admin") || candidate.startsWith("/portal") || candidate.startsWith("/account")) return true;
-  return false;
-}
 
 export default async function MfaPage({ searchParams }: { searchParams: Promise<{ next?: string }> }) {
   const { next: requestedNext } = await searchParams;

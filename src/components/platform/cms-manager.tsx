@@ -946,8 +946,44 @@ export function CmsHeroManager({
         {deleteSlideState.message && <p className="module-success" role="status">{deleteSlideState.message}</p>}
 
         {(isCreatingSlide || editingSlide) && (
-          <form action={saveSlideAction} className="auth-form lead-create-form" style={{ marginTop: "24px", marginBottom: "32px", padding: "20px", border: "1px solid var(--line)", borderRadius: "14px", background: "var(--surface-raised)" }}>
+          <form
+            action={saveSlideAction}
+            className="auth-form lead-create-form"
+            encType="multipart/form-data"
+            style={{ marginTop: "24px", marginBottom: "32px", padding: "20px", border: "1px solid var(--line)", borderRadius: "14px", background: "var(--surface-raised)" }}
+          >
             {editingSlide && <input name="id" type="hidden" value={editingSlide.id} />}
+            
+            <label style={{ gridColumn: "1 / -1" }}>
+              Upload Slide Image/Video (Optional — Auto-uploads to storage and populates URL)
+              <input
+                accept="image/*,video/mp4,video/webm"
+                name="file"
+                type="file"
+              />
+            </label>
+
+            {editingSlide?.image_url && (
+              <div style={{ gridColumn: "1 / -1", display: "flex", alignItems: "center", gap: "12px", padding: "10px 14px", borderRadius: "8px", background: "var(--surface)", border: "1px solid var(--line)" }}>
+                <div style={{ width: "64px", height: "40px", borderRadius: "6px", overflow: "hidden", background: "#000", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  {editingSlide.image_url.endsWith(".mp4") || editingSlide.image_url.endsWith(".webm") ? (
+                    <Video color="#dfb15b" size={20} />
+                  ) : (
+                    /* eslint-disable-next-line @next/next/no-img-element */
+                    <img
+                      alt={editingSlide.alt_text || editingSlide.title}
+                      src={editingSlide.image_url}
+                      style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                    />
+                  )}
+                </div>
+                <div>
+                  <small style={{ color: "var(--text-muted)" }}>Current Slide Asset:</small>
+                  <p style={{ margin: 0, fontSize: "12px", fontFamily: "monospace" }}>{editingSlide.image_url}</p>
+                </div>
+              </div>
+            )}
+
             <label>
               Slide Title / Internal Name *
               <input defaultValue={editingSlide?.title ?? ""} name="title" placeholder="TheCodexThrill Engineering Studio" required type="text" />
@@ -1010,7 +1046,7 @@ export function CmsHeroManager({
                 <th>Slide &amp; Label</th>
                 <th>Status</th>
                 <th>Order</th>
-                <th>Image Preview</th>
+                <th>Media Preview</th>
                 <th>Actions</th>
               </tr>
             </thead>
@@ -1022,41 +1058,77 @@ export function CmsHeroManager({
                   </td>
                 </tr>
               ) : (
-                slides.map((s) => (
-                  <tr key={s.id}>
-                    <td>
-                      <strong>{s.title}</strong>
-                      <small>{s.label}</small>
-                    </td>
-                    <td>
-                      <span className="record-status">{s.status}</span>
-                    </td>
-                    <td>{s.sort_order}</td>
-                    <td>
-                      <small style={{ fontFamily: "monospace", fontSize: "11px" }}>{s.image_url}</small>
-                    </td>
-                    <td>
-                      <div style={{ display: "flex", gap: "8px" }}>
-                        <button
-                          className="button button-small button-secondary"
-                          onClick={() => {
-                            setIsCreatingSlide(false);
-                            setEditingSlide(s);
-                          }}
-                          type="button"
-                        >
-                          <Edit2 size={13} /> Edit
-                        </button>
-                        <form action={deleteSlideAction}>
-                          <input name="id" type="hidden" value={s.id} />
-                          <button className="button button-small button-danger" disabled={deleteSlidePending} type="submit">
-                            <Trash2 size={13} />
+                slides.map((s) => {
+                  const isVideo = s.image_url?.endsWith(".mp4") || s.image_url?.endsWith(".webm") || s.image_url?.includes("video/");
+
+                  return (
+                    <tr key={s.id}>
+                      <td>
+                        <strong>{s.title}</strong>
+                        <small>{s.label}</small>
+                      </td>
+                      <td>
+                        <span className="record-status">{s.status}</span>
+                      </td>
+                      <td>{s.sort_order}</td>
+                      <td>
+                        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                          <div
+                            style={{
+                              width: "48px",
+                              height: "32px",
+                              borderRadius: "6px",
+                              border: "1px solid var(--line)",
+                              background: "var(--surface-raised)",
+                              overflow: "hidden",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              flexShrink: 0,
+                            }}
+                          >
+                            {isVideo ? (
+                              <Video color="#dfb15b" size={16} />
+                            ) : s.image_url?.startsWith("http") || s.image_url?.startsWith("/") ? (
+                              /* eslint-disable-next-line @next/next/no-img-element */
+                              <img
+                                alt={s.alt_text || s.title}
+                                src={s.image_url}
+                                style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                                onError={(e) => {
+                                  (e.currentTarget as HTMLElement).style.display = "none";
+                                }}
+                              />
+                            ) : (
+                              <ImageIcon color="var(--text-muted)" size={16} />
+                            )}
+                          </div>
+                          <small style={{ fontFamily: "monospace", fontSize: "11px", wordBreak: "break-all" }}>{s.image_url}</small>
+                        </div>
+                      </td>
+                      <td>
+                        <div style={{ display: "flex", gap: "8px" }}>
+                          <button
+                            className="button button-small button-secondary"
+                            onClick={() => {
+                              setIsCreatingSlide(false);
+                              setEditingSlide(s);
+                            }}
+                            type="button"
+                          >
+                            <Edit2 size={13} /> Edit
                           </button>
-                        </form>
-                      </div>
-                    </td>
-                  </tr>
-                ))
+                          <form action={deleteSlideAction}>
+                            <input name="id" type="hidden" value={s.id} />
+                            <button className="button button-small button-danger" disabled={deleteSlidePending} type="submit">
+                              <Trash2 size={13} />
+                            </button>
+                          </form>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>

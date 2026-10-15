@@ -57,7 +57,7 @@ const serviceHighlights: Record<string, { deliverables: string[]; stack: string[
       "Strict citation tracing & hallucination mitigation",
       "Human-in-the-loop review and approval workflows",
     ],
-    stack: ["FastMCP", "pgvector", "Python Agents", "Supabase", "OpenAI / Claude"],
+    stack: ["FastMCP", "pgvector", "Python Agents", "PostgreSQL", "OpenAI / Claude"],
   },
   "saas-platforms": {
     deliverables: [
@@ -66,7 +66,7 @@ const serviceHighlights: Record<string, { deliverables: string[]; stack: string[
       "High-throughput webhook delivery & retry queue",
       "Tenant admin portal with role-based permissions",
     ],
-    stack: ["Supabase Cloud", "PostgreSQL RLS", "Server Actions", "Stripe API", "Zod"],
+    stack: ["Enterprise Cloud", "PostgreSQL RLS", "Server Actions", "Stripe API", "Zod"],
   },
   "cloud-devops": {
     deliverables: [
@@ -75,7 +75,7 @@ const serviceHighlights: Record<string, { deliverables: string[]; stack: string[
       "Canary staging environments with automatic rollback",
       "Real-time OpenTelemetry observability & health alerts",
     ],
-    stack: ["Docker", "GitHub Actions", "Vercel Edge", "Prometheus", "Supabase CLI"],
+    stack: ["Docker", "GitHub Actions", "Edge Networks", "Prometheus", "Automated CI/CD"],
   },
   "enterprise-software": {
     deliverables: [
@@ -115,7 +115,7 @@ export default async function ServicesPage() {
                   "Automated test coverage & security audit",
                   "Zero-downtime deployment & handover",
                 ],
-                stack: ["Next.js", "TypeScript", "PostgreSQL", "Supabase", "Tailwind CSS"],
+                stack: ["Next.js", "TypeScript", "PostgreSQL", "Enterprise Auth", "Tailwind CSS"],
               };
               const isReversed = idx % 2 === 1;
 

@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logSanitizedOperationalEvent } from "@/lib/supabase/platform-health-helper";
+import { extractCanonicalStoragePath } from "@/lib/supabase/delivery-operations-helper";
 
 export async function GET(
   request: NextRequest,
@@ -100,15 +101,7 @@ export async function GET(
   }
 
   // Extract canonical storage path
-  let storagePath: string | null = null;
-  if (rawFileUrl.includes("tenant-documents/")) {
-    const rawPath = rawFileUrl.split("tenant-documents/")[1]?.split("?")[0];
-    if (rawPath) {
-      storagePath = decodeURIComponent(rawPath);
-    }
-  } else if (!rawFileUrl.startsWith("http://") && !rawFileUrl.startsWith("https://")) {
-    storagePath = rawFileUrl;
-  }
+  const storagePath = extractCanonicalStoragePath(rawFileUrl, "tenant-documents");
 
   if (storagePath) {
     try {

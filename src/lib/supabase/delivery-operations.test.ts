@@ -5,7 +5,9 @@ import {
   canPortalUserAccessOrganization,
   canPortalUserAccessSupportTicket,
   classifyInvoiceLifecycleStatus,
+  extractCanonicalStoragePath,
   formatDeliveryDescription,
+  formatMediaBytes,
   parseDeliveryDescription,
   parseInvoiceItems,
   redactInternalNotesForClient,
@@ -228,6 +230,53 @@ describe("Phase 3: Client Delivery & Revenue Operations Helpers", () => {
     );
     assert.equal(resolvePortalTicketOrganizationId(null, activeOrgs), "org-alpha");
     assert.equal(resolvePortalTicketOrganizationId("org-alpha", []), null);
+  });
+
+  it("normalizes document storage paths and protects external links", () => {
+    // Legacy full signed URL with query params
+    const signedUrl = "https://isgoypmebtoipfvtaflg.supabase.co/storage/v1/object/sign/tenant-documents/org-123/1728900-deliverable.pdf?token=eyJhbGciOi...";
+    assert.equal(extractCanonicalStoragePath(signedUrl), "org-123/1728900-deliverable.pdf");
+
+    // URL with URI encoded spaces and characters
+    const encodedUrl = "https://isgoypmebtoipfvtaflg.supabase.co/storage/v1/object/public/tenant-documents/org-456/Architecture%20Deck%20v2.pdf";
+    assert.equal(extractCanonicalStoragePath(encodedUrl), "org-456/Architecture Deck v2.pdf");
+
+    // Canonical relative path
+    assert.equal(extractCanonicalStoragePath("org-789/spec.docx"), "org-789/spec.docx");
+
+    // External links (Figma, GitHub, external Google Drive) return null for bucket storage
+    assert.equal(extractCanonicalStoragePath("https://www.figma.com/file/abcdef123/Design-System"), null);
+    assert.equal(extractCanonicalStoragePath("https://github.com/client-org/repo"), null);
+
+    // Empty or undefined values
+    assert.equal(extractCanonicalStoragePath(""), null);
+    assert.equal(extractCanonicalStoragePath(null), null);
+    assert.equal(extractCanonicalStoragePath(undefined), null);
+  });
+
+  it("formats media and document byte sizes to human-readable units", () => {
+    assert.equal(formatMediaBytes(0), "0 B");
+    assert.equal(formatMediaBytes(-100), "0 B");
+    assert.equal(formatMediaBytes(500), "500 B");
+    assert.equal(formatMediaBytes(1024), "1 KB");
+    assert.equal(formatMediaBytes(1536), "1.5 KB");
+    assert.equal(formatMediaBytes(1048576), "1 MB");
+    assert.equal(formatMediaBytes(26214400), "25 MB");
+    assert.equal(formatMediaBytes(1073741824), "1 GB");
+  });
+
+  it("enforces tenant document organization isolation for client portal users", () => {
+    const userActiveOrgs = new Set(["org-corp-a", "org-corp-b"]);
+
+    // User can access documents for their active organizations
+    assert.equal(canPortalUserAccessOrganization("org-corp-a", userActiveOrgs), true);
+    assert.equal(canPortalUserAccessOrganization("org-corp-b", userActiveOrgs), true);
+
+    // User CANNOT access documents from another tenant
+    assert.equal(canPortalUserAccessOrganization("org-foreign-c", userActiveOrgs), false);
+    assert.equal(canPortalUserAccessOrganization(null, userActiveOrgs), false);
+    assert.equal(canPortalUserAccessOrganization(undefined, userActiveOrgs), false);
+    assert.equal(canPortalUserAccessOrganization("org-corp-a", []), false);
   });
 });
 

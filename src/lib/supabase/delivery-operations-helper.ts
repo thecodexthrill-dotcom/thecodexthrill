@@ -461,4 +461,41 @@ export function resolvePortalTicketOrganizationId(
   return orgList[0] ?? null;
 }
 
+/**
+ * Normalizes any stored document URL/path (legacy full URL, signed URL with tokens,
+ * or direct storage path) to its canonical storage path within the bucket.
+ * Returns null if the URL is an external link (e.g. Figma or GitHub).
+ */
+export function extractCanonicalStoragePath(
+  rawFileUrl: string | null | undefined,
+  bucketName = "tenant-documents",
+): string | null {
+  if (!rawFileUrl) return null;
+  const trimmed = rawFileUrl.trim();
+  if (!trimmed) return null;
+
+  const bucketPrefix = `${bucketName}/`;
+  if (trimmed.includes(bucketPrefix)) {
+    const rawPath = trimmed.split(bucketPrefix)[1]?.split("?")[0];
+    if (rawPath) {
+      return decodeURIComponent(rawPath);
+    }
+  } else if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
+    return trimmed;
+  }
+  return null;
+}
+
+/**
+ * Formats file size in bytes to human-readable strings (e.g. 500 B, 1.2 MB).
+ */
+export function formatMediaBytes(bytes: number, decimals = 1): string {
+  if (!bytes || bytes <= 0) return "0 B";
+  const k = 1024;
+  const dm = decimals < 0 ? 0 : decimals;
+  const sizes = ["B", "KB", "MB", "GB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i] || "MB"}`;
+}
+
 

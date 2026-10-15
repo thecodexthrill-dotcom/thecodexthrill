@@ -16,7 +16,7 @@ const securityPillars = [
     icon: Lock,
     title: "Database Row-Level Security",
     description:
-      "Every data query is enforced at the database level by PostgreSQL Row-Level Security (RLS) in Supabase Cloud. Tenant organizations are isolated so that no cross-tenant data leakage is structurally possible.",
+      "Every data query is enforced at the database level by PostgreSQL Row-Level Security (RLS) in our cloud database architecture. Tenant organizations are isolated so that no cross-tenant data leakage is structurally possible.",
   },
   {
     icon: KeyRound,
@@ -66,7 +66,7 @@ export default function SecurityPage() {
         <div className="article-body container-shell">
           <h2>1. Infrastructure Security and Cloud Isolation</h2>
           <p>
-            TheCodexThrill application runs on enterprise edge infrastructure backed by Supabase Cloud (AWS, region ap-northeast-2). Communication is secured with TLS 1.3/1.2 enforcing modern cryptographic cipher suites and HTTP Strict Transport Security (HSTS).
+            TheCodexThrill application runs on enterprise edge infrastructure backed by Tier-1 enterprise cloud hosting (AWS, region ap-northeast-2). Communication is secured with TLS 1.3/1.2 enforcing modern cryptographic cipher suites and HTTP Strict Transport Security (HSTS).
           </p>
           <p>
             Database access utilizes least-privilege service roles with direct SQL table grants revoked from public and anonymous roles. Operations utilize hardened <code>SECURITY DEFINER</code> functions with explicitly pinned search paths to prevent SQL injection and schema confusion attacks.
@@ -74,7 +74,7 @@ export default function SecurityPage() {
 
           <h2>2. Authentication and Session Management</h2>
           <p>
-            Authentication sessions are managed via httpOnly, secure, Lax SameSite cookies. Passwords are never stored in application tables and are hashed using bcrypt/argon2 via Supabase Auth. Password recovery links require fresh verification claims and enforce MFA when factors are enrolled.
+            Authentication sessions are managed via httpOnly, secure, Lax SameSite cookies. Passwords are never stored in application tables and are hashed using bcrypt/argon2 via our zero-trust identity service. Password recovery links require fresh verification claims and enforce MFA when factors are enrolled.
           </p>
 
           <h2>3. Single Super Admin Invariant</h2>

@@ -632,12 +632,45 @@ export async function saveCmsHeroSlideAction(
 ): Promise<CmsActionState> {
   const { supabase, user } = await verifyCmsAdminSession();
 
+  const file = formData.get("file");
+  let resolvedImageUrl = (formData.get("image_url") as string)?.trim() || "";
+
+  if (file && typeof file === "object" && "size" in file && (file as File).size > 0) {
+    const uploadedFile = file as File;
+    const sanitizedFileName = uploadedFile.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+    const storagePath = `cms-hero/${Date.now()}-${sanitizedFileName}`;
+
+    try {
+      const adminSupabase = createAdminClient();
+      const arrayBuffer = await uploadedFile.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+
+      const { error: uploadErr } = await adminSupabase.storage
+        .from("cms-media")
+        .upload(storagePath, buffer, {
+          contentType: uploadedFile.type || "image/jpeg",
+          upsert: true,
+        });
+
+      if (!uploadErr) {
+        const { data: publicUrlData } = adminSupabase.storage
+          .from("cms-media")
+          .getPublicUrl(storagePath);
+        resolvedImageUrl = publicUrlData?.publicUrl || `/brand/${sanitizedFileName}`;
+      } else {
+        resolvedImageUrl = resolvedImageUrl || `/brand/${sanitizedFileName}`;
+      }
+    } catch {
+      resolvedImageUrl = resolvedImageUrl || `/brand/${sanitizedFileName}`;
+    }
+  }
+
   const raw = {
     id: formData.get("id") ? String(formData.get("id")) : undefined,
     title: formData.get("title"),
     label: formData.get("label"),
     tagline: formData.get("tagline"),
-    imageUrl: formData.get("image_url"),
+    imageUrl: resolvedImageUrl || "/brand/thecodexthrill-banner.jpg",
     altText: formData.get("alt_text") || "",
     linkUrl: formData.get("link_url") || undefined,
     status: formData.get("status") || "published",

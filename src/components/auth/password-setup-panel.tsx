@@ -64,7 +64,7 @@ export function PasswordSetupPanel({ sessionValid, linkStatus, sessionUnavailabl
         <p className="eyebrow"><span />ACCOUNT RECOVERY</p>
         <h1 id="password-setup-title">Set Your New Password</h1>
         <p className="auth-description">Choose a new password for your TheCodexThrill account.</p>
-        <div className="auth-notice"><ShieldCheck aria-hidden="true" size={18} /><p>Your password is updated securely through Supabase. Account access still follows your assigned permissions and MFA requirements.</p></div>
+        <div className="auth-notice"><ShieldCheck aria-hidden="true" size={18} /><p>Your password is updated securely through our encrypted authentication service. Account access still follows your assigned permissions and MFA requirements.</p></div>
 
         {effectiveSessionValid ? (
           state.passwordUpdated ? (
@@ -103,7 +103,7 @@ export function PasswordSetupPanel({ sessionValid, linkStatus, sessionUnavailabl
             <ShieldCheck aria-hidden="true" size={18} />
             <div>
               <strong>{verifyingLink ? "Verifying your recovery link…" : linkStatus === "expired" ? "This recovery link has expired" : linkStatus === "used" ? "This recovery link has already been used" : linkStatus === "invalid" ? "This recovery link is invalid" : sessionUnavailable ? "Secure recovery session could not be established" : "Recovery session required"}</strong>
-              <p>{verifyingLink ? "Establishing your secure recovery session with Supabase…" : linkStatus ? "Recovery links expire or can be used only once. Request a fresh email, then open its link in this browser." : sessionUnavailable ? "Supabase verified the callback but did not confirm a complete browser session. Request a fresh recovery email and open the newest link." : "Open the password recovery link from your email in this browser. Once Supabase verifies it, the password form will appear here."}</p>
+              <p>{verifyingLink ? "Establishing your secure recovery session…" : linkStatus ? "Recovery links expire or can be used only once. Request a fresh email, then open its link in this browser." : sessionUnavailable ? "The security service verified the callback but did not confirm a complete browser session. Request a fresh recovery email and open the newest link." : "Open the password recovery link from your email in this browser. Once verification completes, the password form will appear here."}</p>
               <Link href="/forgot-password">Request a fresh recovery email</Link>
             </div>
           </div>
