@@ -436,7 +436,8 @@ export async function resolveVerifiedInvitationState(options: {
       typeof details.expires_at === "string"
         ? details.expires_at
         : new Date(new Date(raw.occurred_at).getTime() + 24 * 60 * 60 * 1000).toISOString();
-    if (new Date(expiresAtIso).getTime() <= Date.now()) {
+    const isConfirmedAccount = Boolean(authUser.email_confirmed_at);
+    if (!isConfirmedAccount && new Date(expiresAtIso).getTime() <= Date.now()) {
       return {
         invitationVerified: false,
         status: "expired",

@@ -281,3 +281,177 @@ test("codebase verification: no sequential manual upserts remain in application 
     "lead actions must not contain manual organization_role_assignments insert",
   );
 });
+
+function createMockQueryBuilder(dataMap: Record<string, unknown>) {
+  return (table: string) => {
+    const tableData = dataMap[table] ?? [];
+    const chain: Record<string, unknown> = {
+      data: tableData,
+      error: null,
+    };
+    const returnSelf = () => chain;
+    chain.select = returnSelf;
+    chain.eq = returnSelf;
+    chain.is = returnSelf;
+    chain.in = returnSelf;
+    chain.order = returnSelf;
+    chain.limit = returnSelf;
+    chain.maybeSingle = async () => ({
+      data: Array.isArray(tableData) ? tableData[0] ?? null : tableData,
+      error: null,
+    });
+    chain.then = (resolve: (val: unknown) => unknown) =>
+      Promise.resolve({ data: tableData, error: null }).then(resolve);
+    return chain;
+  };
+}
+
+test("regression: confirmed client accounts with missing memberships are not marked expired after 24h", async () => {
+  const { resolveVerifiedInvitationState } = await import("./invitation-fallback-service.ts");
+
+  const twoDaysAgo = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+  const mockAdmin = {
+    auth: {
+      admin: {
+        getUserById: async () => ({
+          data: {
+            user: {
+              id: "client-confirmed-uuid",
+              email: "client@example.com",
+              invited_at: twoDaysAgo,
+              email_confirmed_at: twoDaysAgo, // Confirmed on day 1
+              user_metadata: {},
+            },
+          },
+          error: null,
+        }),
+      },
+    },
+    from: createMockQueryBuilder({
+      audit_events: [
+        {
+          id: "audit-1",
+          action: "organization.member_invited",
+          target_type: "organizations",
+          target_id: "org-codesparks-uuid",
+          details: {
+            role: "client_owner",
+            email: "client@example.com",
+            expires_at: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+          },
+          occurred_at: twoDaysAgo,
+          actor_user_id: "admin-actor-uuid",
+        },
+      ],
+      platform_role_assignments: [],
+      organization_memberships: [],
+    }),
+  } as unknown as Parameters<typeof resolveVerifiedInvitationState>[0]["adminClientOverride"];
+
+  const state = await resolveVerifiedInvitationState({
+    userId: "client-confirmed-uuid",
+    rpcStatus: null,
+    adminClientOverride: mockAdmin,
+  });
+
+  // Must be verified and valid for reconciliation because user already confirmed
+  assert.equal(state.invitationVerified, true);
+  assert.equal(state.status, "valid");
+  assert.equal(state.organizationId, "org-codesparks-uuid");
+  assert.equal(state.organizationRole, "client_owner");
+});
+
+test("regression: unconfirmed accounts are rejected as invalid", async () => {
+  const { resolveVerifiedInvitationState } = await import("./invitation-fallback-service.ts");
+
+  const twoDaysAgo = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+  const mockAdmin = {
+    auth: {
+      admin: {
+        getUserById: async () => ({
+          data: {
+            user: {
+              id: "unconfirmed-uuid",
+              email: "unconfirmed@example.com",
+              invited_at: twoDaysAgo,
+              email_confirmed_at: null, // NOT confirmed!
+              user_metadata: {},
+            },
+          },
+          error: null,
+        }),
+      },
+    },
+    from: createMockQueryBuilder({}),
+  } as unknown as Parameters<typeof resolveVerifiedInvitationState>[0]["adminClientOverride"];
+
+  const state = await resolveVerifiedInvitationState({
+    userId: "unconfirmed-uuid",
+    rpcStatus: null,
+    adminClientOverride: mockAdmin,
+  });
+
+  assert.equal(state.invitationVerified, false);
+  assert.equal(state.status, "invalid");
+});
+
+test("regression: duplicate callbacks and repeated invitation acceptance are idempotent", async () => {
+  let rpcExecutionCount = 0;
+  const mockAdminClient = {
+    rpc: async (fn: string) => {
+      if (fn === "provision_organization_membership") {
+        rpcExecutionCount += 1;
+        // On duplicate/repeated calls, RPC returns ok: true, action: 'unchanged'
+        return { data: { ok: true, action: "unchanged" }, error: null };
+      }
+      return { data: null, error: null };
+    },
+    from: () => ({
+      select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: null }) }) }),
+      insert: async () => ({ error: null }),
+    }),
+  } as unknown as Parameters<typeof completeInvitationAcceptanceFallback>[0]["adminClientOverride"];
+
+  // Call 1
+  const res1 = await completeInvitationAcceptanceFallback({
+    userId: "test-user-uuid",
+    fallbackState: {
+      source: "organization_invite_fallback",
+      invitationVerified: true,
+      status: "pending",
+      email: "test@example.com",
+      organizationId: "org-123",
+      organizationRole: "client_owner",
+    },
+    adminClientOverride: mockAdminClient,
+  });
+
+  // Call 2 (Duplicate / repeated callback)
+  const res2 = await completeInvitationAcceptanceFallback({
+    userId: "test-user-uuid",
+    fallbackState: {
+      source: "organization_invite_fallback",
+      invitationVerified: true,
+      status: "pending",
+      email: "test@example.com",
+      organizationId: "org-123",
+      organizationRole: "client_owner",
+    },
+    adminClientOverride: mockAdminClient,
+  });
+
+  assert.equal(res1.ok, true);
+  assert.equal(res2.ok, true);
+  assert.equal(rpcExecutionCount, 2);
+});
+
+test("regression: unauthorized role escalation attempts are strictly blocked", () => {
+  // Client invite roles can never grant platform_admin or super_admin
+  const attemptedRoles = ["super_admin", "platform_admin", "root", "admin", "owner"];
+  for (const maliciousRole of attemptedRoles) {
+    const mapped = mapClientInviteRoleToOrganizationRole(maliciousRole as never);
+    // Any unrecognized role defaults safely to least-privileged client_member
+    assert.equal(mapped, "client_member");
+  }
+});
+

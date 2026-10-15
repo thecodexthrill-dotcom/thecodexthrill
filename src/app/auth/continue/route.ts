@@ -1,5 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import {
+  resolveVerifiedInvitationState,
+  completeInvitationAcceptanceFallback,
+} from "@/lib/supabase/invitation-fallback-service";
 
 export async function GET(request: NextRequest) {
   const supabase = await createClient();
@@ -38,6 +42,29 @@ export async function GET(request: NextRequest) {
   const superAdmin = superAdminResult.data;
   const member = membershipResult.data;
   if (!member && !superAdmin && platform.length === 0) {
+    if (user.invited_at && user.email) {
+      try {
+        const fallbackState = await resolveVerifiedInvitationState({
+          userId: user.id,
+          rpcStatus: null,
+        });
+        if (
+          fallbackState.invitationVerified &&
+          fallbackState.organizationId &&
+          fallbackState.source === "organization_invite_fallback"
+        ) {
+          const res = await completeInvitationAcceptanceFallback({
+            userId: user.id,
+            fallbackState,
+          });
+          if (res.ok) {
+            return NextResponse.redirect(new URL("/portal", request.url));
+          }
+        }
+      } catch (err) {
+        console.error("[auth.continue] Client auto-reconciliation deferred", err);
+      }
+    }
     const isInvitedClient = Boolean(user.invited_at);
     const pendingPath = isInvitedClient ? "/access-pending?type=client_provisioning" : "/access-pending";
     return NextResponse.redirect(new URL(pendingPath, request.url));
